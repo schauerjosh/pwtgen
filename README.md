@@ -56,6 +56,44 @@ pwtgen gen
 # When prompted, enter: tests/new-feature.spec.ts
 ```
 
+## Using pwtgen as a Dependency in Another Project
+
+You can install `pwtgen` directly into your own project as a dev dependency:
+
+### 1. Install via npm (from GitHub)
+Replace `<your-username>` and `<repo>` with your GitHub details if private, or use the public repo URL:
+```bash
+npm install --save-dev github:schauerjosh/pwtgen
+```
+
+Or, if you publish to npm, use:
+```bash
+npm install --save-dev pwtgen
+```
+
+### 2. Add Environment Variables
+Copy the `.env.example` from `pwtgen` to your project root and rename it to `.env`. Fill in the required variables:
+- `JIRA_EMAIL`
+- `JIRA_API_TOKEN`
+- `JIRA_DOMAIN`
+- `OPENAI_API_KEY`
+
+### 3. Run the CLI
+You can run the CLI using npx:
+```bash
+npx pwtgen gen
+```
+Or add a script to your `package.json`:
+```json
+"scripts": {
+  "pwtgen": "pwtgen gen"
+}
+```
+Then run:
+```bash
+npm run pwtgen
+```
+
 ## Security
 - Your `.env` file is never committed (see `.gitignore`)
 - Do not share your API keys

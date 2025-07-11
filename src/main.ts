@@ -29,12 +29,72 @@ export default async function main() {
     const acceptanceCriteria = issue.fields.customfield_10031 ? JSON.stringify(issue.fields.customfield_10031) : undefined;
     console.log(`\nTitle of ${jiraTicket}: ${title}`);
 
+    // Prompt for source code context
+    const { sourcePaths } = await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'sourcePaths',
+        message: 'Enter relative paths to source code files/folders for UI selectors/components (comma-separated):',
+        default: 'src/',
+        filter: (input) => input.split(',').map((s: string) => s.trim()).filter(Boolean)
+      }
+    ]);
+    let sourceContext = '';
+    for (const relPath of sourcePaths) {
+      try {
+        const absPath = path.resolve(relPath);
+        if (fs.existsSync(absPath)) {
+          if (fs.lstatSync(absPath).isDirectory()) {
+            const files = fs.readdirSync(absPath).filter(f => f.endsWith('.ts') || f.endsWith('.tsx') || f.endsWith('.js'));
+            for (const file of files) {
+              sourceContext += `\n// File: ${file}\n` + fs.readFileSync(path.join(absPath, file), 'utf8');
+            }
+          } else {
+            sourceContext += `\n// File: ${relPath}\n` + fs.readFileSync(absPath, 'utf8');
+          }
+        }
+      } catch {}
+    }
+
+    // Detect login in description/acceptance criteria
+    const loginDetected = /login|sign in|log in|authenticate/i.test(description + (acceptanceCriteria || ''));
+    let loginCredentials = undefined;
+    if (loginDetected) {
+      loginCredentials = await inquirer.prompt([
+        {
+          type: 'input',
+          name: 'username',
+          message: 'Login detected. Enter username to use in the test:',
+          default: 'testuser'
+        },
+        {
+          type: 'input',
+          name: 'password',
+          message: 'Enter password to use in the test:',
+          default: 'password123'
+        }
+      ]);
+    }
+
+    // Prompt for domain to run the Playwright test at
+    const { testDomain } = await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'testDomain',
+        message: 'Enter the domain/URL where this Playwright test should run:',
+        default: 'https://example.com'
+      }
+    ]);
+
     // Generate Playwright test using OpenAI
     console.log('\nGenerating Playwright test using OpenAI...');
     const testCode = await generatePlaywrightTest({
       title,
       description,
-      acceptanceCriteria
+      acceptanceCriteria,
+      sourceContext,
+      loginCredentials,
+      testDomain
     });
     console.log('\nGenerated Playwright Test:\n');
     console.log(testCode);

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 const { handleRecordCommand } = require('./main');
-import main from './main';
+import { handleFromJiraCommand } from './main';
 
 const program = new Command();
 
@@ -21,7 +21,7 @@ program
   .command('from-jira')
   .description('Automate Playwright test generation from a JIRA card using semantic search and RAG')
   .action(async () => {
-    await main();
+    await handleFromJiraCommand();
   });
 
 program.parse(process.argv);

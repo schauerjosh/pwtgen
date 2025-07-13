@@ -55,7 +55,7 @@ async function semanticSearch(query: string, topN = 3) {
   }));
 }
 
-export default async function main() {
+export async function handleFromJiraCommand() {
   // Prompt for Jira ticket number only
   const { jiraTicket } = await inquirer.prompt([
     {

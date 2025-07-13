@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
-import main from './main';
+import { handleFromJiraCommand } from './main';
 
 const program = new Command();
 
@@ -12,6 +12,6 @@ program
 program
   .command('gen')
   .description('Generate a Playwright test from a Jira ticket')
-  .action(main);
+  .action(handleFromJiraCommand);
 
 program.parse(process.argv);

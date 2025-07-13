@@ -3,7 +3,7 @@ import path from 'path';
 import axios from 'axios';
 
 // TODO: Fill in with the 32 vProMedia knowledge base article URLs and titles
-const articles = [
+const articles: { title: string; url: string }[] = [
   // Example:
   // { title: 'How to Login', url: 'https://kb.vcreative.net/article/how-to-login' },
 ];

@@ -11,6 +11,7 @@ const openai_1 = require("./openai");
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const axios = require('axios');
+const actions_json_1 = __importDefault(require("../knowledgebase/actions.json"));
 const ENV_URLS = {
     prod: 'https://vcreative.net/',
     twotest: 'https://two-test.vcreative.net/',
@@ -18,6 +19,10 @@ const ENV_URLS = {
     qa: 'https://qa.vcreative.net/',
     local: 'http://localhost:4200',
 };
+function getActionSteps(actionName) {
+    const found = actions_json_1.default.find((a) => a.action.toLowerCase().includes(actionName.toLowerCase()));
+    return found ? found.steps : [];
+}
 async function main() {
     // Prompt for Jira ticket number only
     const { jiraTicket } = await inquirer_1.default.prompt([

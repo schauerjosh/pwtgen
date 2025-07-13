@@ -6,6 +6,9 @@ import { generatePlaywrightTest } from './openai';
 import fs from 'fs';
 import path from 'path';
 const axios = require('axios');
+import kbActions from '../knowledgebase/actions.json';
+import articleEmbeddings from '../knowledgebase/article_embeddings.json';
+import articles from '../knowledgebase/articles.json';
 
 const ENV_URLS = {
   prod: 'https://vcreative.net/',
@@ -14,6 +17,43 @@ const ENV_URLS = {
   qa: 'https://qa.vcreative.net/',
   local: 'http://localhost:4200',
 };
+
+function getActionSteps(actionName: string) {
+  const found = kbActions.find((a: any) => a.action.toLowerCase().includes(actionName.toLowerCase()));
+  return found ? found.steps : [];
+}
+
+async function getQueryEmbedding(query: string) {
+  const openai = new (require('openai')).OpenAI({ apiKey: config.openaiApiKey });
+  const response = await openai.embeddings.create({
+    model: 'text-embedding-ada-002',
+    input: query,
+  });
+  return response.data[0].embedding;
+}
+
+function cosineSimilarity(a: number[], b: number[]) {
+  let dot = 0, normA = 0, normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+async function semanticSearch(query: string, topN = 3) {
+  const queryEmbedding = await getQueryEmbedding(query);
+  const scored = articleEmbeddings.map((item: any, idx: number) => ({
+    idx,
+    score: cosineSimilarity(queryEmbedding, item.embedding)
+  }));
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, topN).map(({ idx, score }) => ({
+    ...articles[idx],
+    score
+  }));
+}
 
 export default async function main() {
   // Prompt for Jira ticket number only
@@ -96,6 +136,131 @@ export default async function main() {
       }
     ]);
 
+    // --- New: Extract actions/roles from card description and acceptance criteria ---
+    const cardText = `${title}\n${description}\n${acceptanceCriteria || ''}`;
+    // Example: extract phrases like "log in as ...", "as ...", "navigate to ...", "select ..."
+    const actionRegex = /(log in as [\w ]+|as [A-Za-z ]+|navigate to [\w ]+|select [\w ]+)/gi;
+    const actionsFound = Array.from(cardText.matchAll(actionRegex)).map(m => m[0]);
+    if (actionsFound.length) {
+      console.log('\nDetected actions/roles in card:');
+      actionsFound.forEach((a, i) => console.log(`  [${i+1}] ${a}`));
+      // For each action, query the knowledge base
+      for (const action of actionsFound) {
+        console.log(`\nSearching knowledge base for: "${action}" ...`);
+        const results = await semanticSearch(action, 2);
+        results.forEach((res, i) => {
+          console.log(`  [${i+1}] ${res.title}\n  URL: ${res.url}\n  Score: ${res.score.toFixed(3)}\n  Content: ${res.content.slice(0, 300)}...`);
+        });
+      }
+    } else {
+      console.log('\nNo explicit actions/roles detected in card.');
+    }
+
+    // --- Step: Detect required entities from card ---
+    const entityKeywords = [
+      { key: 'spot', regex: /spot|spot data|spot info/i },
+      { key: 'user', regex: /user|login as|sign in as|authenticate as/i },
+      { key: 'station', regex: /station|broadcast station/i },
+      { key: 'firm', regex: /firm|firm id/i },
+      { key: 'adtype', regex: /adtype|ad type/i }
+    ];
+    const requiredEntities = entityKeywords.filter(e => e.regex.test(cardText)).map(e => e.key);
+    if (requiredEntities.length) {
+      console.log(`\nEntities required for this test (detected from card): ${requiredEntities.join(', ')}`);
+    } else {
+      console.log('\nNo specific entities detected from card.');
+    }
+
+    // --- Step: Prompt for mock data usage ---
+    let useMockData = false;
+    if (requiredEntities.length) {
+      const { mockChoice } = await inquirer.prompt([
+        {
+          type: 'confirm',
+          name: 'mockChoice',
+          message: `Do you want to use mock data for the required entities (${requiredEntities.join(', ')})?`,
+          default: true
+        }
+      ]);
+      useMockData = mockChoice;
+    }
+
+    // --- Step: Load mock data if chosen ---
+    let mockData: any = {};
+    if (useMockData) {
+      // Only use spotPresets.valid for spot, and similar for other entities
+      try {
+        if (requiredEntities.includes('spot')) {
+          const { spotPresets } = require('../app/mock-data/spot-mock');
+          mockData.spot = spotPresets.valid;
+          console.log('\nUsing mock spot data (spotPresets.valid):', mockData.spot);
+        }
+        if (requiredEntities.includes('user')) {
+          const { userPresets } = require('../app/mock-data/user-mock');
+          mockData.user = userPresets.valid;
+          console.log('\nUsing mock user data (userPresets.valid):', mockData.user);
+        }
+        if (requiredEntities.includes('station')) {
+          const { stationPresets } = require('../app/mock-data/station-mock');
+          mockData.station = stationPresets.valid;
+          console.log('\nUsing mock station data (stationPresets.valid):', mockData.station);
+        }
+        if (requiredEntities.includes('firm')) {
+          const { firmPresets } = require('../app/mock-data/firm-mock');
+          mockData.firm = firmPresets.valid;
+          console.log('\nUsing mock firm data (firmPresets.valid):', mockData.firm);
+        }
+        if (requiredEntities.includes('adtype')) {
+          const { adtypePresets } = require('../app/mock-data/adtype-mock');
+          mockData.adtype = adtypePresets.valid;
+          console.log('\nUsing mock adtype data (adtypePresets.valid):', mockData.adtype);
+        }
+      } catch (err) {
+        console.log('Error loading mock data:', err);
+      }
+    }
+
+    // --- Step: Prompt for file location for Playwright test ---
+    const { testPath } = await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'testPath',
+        message: 'Path to save the Playwright test file:',
+        default: path.join('tests', `${jiraTicket}.spec.ts`),
+        validate: (input) => input ? true : 'Test file path is required.'
+      }
+    ]);
+    const absPath = path.resolve(testPath);
+
+    // --- Step: Prompt for any specific data needed ---
+    // If not using mock data, prompt for manual entry for each required entity
+    if (!useMockData && requiredEntities.length) {
+      for (const entity of requiredEntities) {
+        const { entityData } = await inquirer.prompt([
+          {
+            type: 'input',
+            name: 'entityData',
+            message: `Enter data for required entity (${entity}) or leave blank to skip:`,
+            default: ''
+          }
+        ]);
+        mockData[entity] = entityData || undefined;
+      }
+    }
+
+    // --- Step: Display summary to developer ---
+    console.log('\nSummary:');
+    console.log(`JIRA Ticket: ${jiraTicket}`);
+    console.log(`Test file location: ${absPath}`);
+    if (requiredEntities.length) {
+      console.log(`Required entities: ${requiredEntities.join(', ')}`);
+      if (useMockData) {
+        console.log('Using mock data for entities.');
+      } else {
+        console.log('Using provided data for entities.');
+      }
+    }
+
     // Generate Playwright test using OpenAI
     console.log('\nGenerating Playwright test using OpenAI...');
     const testCode = await generatePlaywrightTest({
@@ -107,7 +272,7 @@ export default async function main() {
 
     // Prompt for file path
     const defaultPath = path.join('tests', `${jiraTicket}.spec.ts`);
-    const { testPath } = await inquirer.prompt([
+    const { testPath: finalTestPath } = await inquirer.prompt([
       {
         type: 'input',
         name: 'testPath',
@@ -116,31 +281,31 @@ export default async function main() {
         validate: (input) => input ? true : 'Test file path is required.'
       }
     ]);
-    const absPath = path.resolve(testPath);
+    const finalAbsPath = path.resolve(finalTestPath);
     let writeMode: 'new' | 'append' = 'new';
-    if (fs.existsSync(absPath)) {
+    if (fs.existsSync(finalAbsPath)) {
       const { append } = await inquirer.prompt([
         {
           type: 'confirm',
           name: 'append',
-          message: `File ${testPath} exists. Append to it? (No will overwrite)`,
+          message: `File ${finalTestPath} exists. Append to it? (No will overwrite)`,
           default: true
         }
       ]);
       writeMode = append ? 'append' : 'new';
     }
     // Ensure directory exists
-    fs.mkdirSync(path.dirname(absPath), { recursive: true });
+    fs.mkdirSync(path.dirname(finalAbsPath), { recursive: true });
     if (writeMode === 'new') {
       // Write full test file
-      fs.writeFileSync(absPath, testCode, 'utf8');
-      console.log(`\nTest file created: ${absPath}`);
+      fs.writeFileSync(finalAbsPath, testCode, 'utf8');
+      console.log(`\nTest file created: ${finalAbsPath}`);
     } else {
       // Append only the test() block
       const testBlockMatch = testCode.match(/(test\s*\(.*[\s\S]*)/);
       if (testBlockMatch) {
-        fs.appendFileSync(absPath, '\n' + testBlockMatch[1], 'utf8');
-        console.log(`\nTest block appended to: ${absPath}`);
+        fs.appendFileSync(finalAbsPath, '\n' + testBlockMatch[1], 'utf8');
+        console.log(`\nTest block appended to: ${finalAbsPath}`);
       } else {
         console.error('Could not find a test() block to append.');
       }

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
-import main from './main';
+const { handleRecordCommand } = require('./main');
 
 const program = new Command();
 
@@ -10,8 +10,10 @@ program
   .version('1.0.0');
 
 program
-  .command('gen')
-  .description('Generate a Playwright test from a Jira ticket')
-  .action(main);
+  .command('record')
+  .description('Launch a browser and record Playwright actions to generate a test (JIRA integration included)')
+  .action(async () => {
+    await handleRecordCommand();
+  });
 
 program.parse(process.argv);

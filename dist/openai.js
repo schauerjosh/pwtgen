@@ -4,12 +4,13 @@ exports.generatePlaywrightTest = generatePlaywrightTest;
 const config_1 = require("./config");
 const openai_1 = require("openai");
 const openai = new openai_1.OpenAI({ apiKey: config_1.config.openaiApiKey });
-async function generatePlaywrightTest({ title, description, acceptanceCriteria }) {
-    let prompt = `You are an expert Playwright test author. Write a production-quality Playwright test in TypeScript for the following Jira ticket.\n`;
-    prompt += `Title: ${title}\n`;
-    prompt += `Description: ${description}\n`;
-    if (acceptanceCriteria) {
-        prompt += `Acceptance Criteria: ${acceptanceCriteria}\n`;
+async function generatePlaywrightTest({ sourceContext, testDomain }) {
+    let prompt = `You are an expert Playwright test author. Write a production-quality Playwright test in TypeScript based only on the following recorded browser session events. Do not use any Jira ticket information. Use only the provided session data to infer selectors, actions, and validations. Output only the test code.`;
+    if (testDomain) {
+        prompt += `\nTest URL: ${testDomain}`;
+    }
+    if (sourceContext) {
+        prompt += `\nSession events:\n${sourceContext}`;
     }
     prompt += `\nDo not hallucinate selectors or UI. Only use information provided. Output only the test code.`;
     const completion = await openai.chat.completions.create({

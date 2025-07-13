@@ -24,8 +24,8 @@ This project automates Playwright test generation for vProMedia using a Retrieva
 - Developer can choose to use mock data or provide specific data for required entities.
 
 ## CLI Workflow
-### 1. Generate Playwright Test (`pwtgen gen`)
-1. **Run CLI:** `pwtgen gen`
+### 1. Generate Playwright Test (`pwtgen from-jira`)
+1. **Run CLI:** `pwtgen from-jira`
 2. **JIRA Ticket:** Enter the JIRA ticket number.
 3. **Knowledge Base Search:** CLI parses card, extracts actions/roles, and queries the knowledge base for guidance on each step.
 4. **Entity Detection:** CLI detects required entities (spot, user, station, firm, adtype) from card text.
@@ -53,7 +53,6 @@ This project automates Playwright test generation for vProMedia using a Retrieva
 $ pwtgen record
 Launching browser in recording mode...
 Perform actions in the browser to record your test steps.
-(Optional) Enter JIRA ticket number to link this recording: QA-279
 Path to save the Playwright test file: tests/QA-279-recorded.spec.ts
 Recording complete. Generated Playwright test:
 // ...recorded test code...
@@ -70,9 +69,9 @@ Recording complete. Generated Playwright test:
 - Send email from notes section
 - Verify email notification
 
-## Example CLI Session (`gen`)
+## Example CLI Session (`from-jira`)
 ```
-$ pwtgen gen
+$ pwtgen from-jira
 Enter the Jira ticket number: QA-279
 Entities required for this test (detected from card): spot, user
 Do you want to use mock data for the required entities (spot, user)? (Y/n): Y
@@ -108,5 +107,3 @@ Generated Playwright Test:
 - Use mock data for rapid prototyping and testing.
 - Use `pwtgen record` for manual workflow capture and debugging.
 
-## Contact & Support
-For questions, feature requests, or support, contact the vCreative QA Automation team.

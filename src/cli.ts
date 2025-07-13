@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 const { handleRecordCommand } = require('./main');
+import main from './main';
 
 const program = new Command();
 
@@ -14,6 +15,13 @@ program
   .description('Launch a browser and record Playwright actions to generate a test (JIRA integration included)')
   .action(async () => {
     await handleRecordCommand();
+  });
+
+program
+  .command('from-jira')
+  .description('Automate Playwright test generation from a JIRA card using semantic search and RAG')
+  .action(async () => {
+    await main();
   });
 
 program.parse(process.argv);

@@ -292,7 +292,40 @@ async function handleFromJiraCommand() {
             console.log(`  [${i + 1}] ${res.title}`);
         });
         console.log('====================================================\n');
-        console.log('Generating Playwright test using OpenAI...');
+        // Prompt for test file path and write mode before generating the test
+        const { testFilePath, mode } = await inquirer_1.default.prompt([
+            {
+                type: 'input',
+                name: 'testFilePath',
+                message: 'Path to save the Playwright test file:',
+                default: 'playwright/test/test-1'
+            },
+            {
+                type: 'list',
+                name: 'mode',
+                message: 'Write mode:',
+                choices: [
+                    { name: 'Create new file', value: 'new' },
+                    { name: 'Append to existing file', value: 'append' }
+                ],
+                default: 'new'
+            }
+        ]);
+        absPath = path_1.default.resolve(testFilePath);
+        writeMode = mode;
+        // Load loginUsers from knowledgebase and use a valid user
+        let loginUsers = [];
+        try {
+            loginUsers = JSON.parse(fs_1.default.readFileSync(path_1.default.join(__dirname, '../knowledgebase/loginUsers.json'), 'utf8'));
+        }
+        catch { }
+        if (loginDetected && loginUsers.length) {
+            const validUser = loginUsers.find((u) => u.isValid);
+            if (validUser) {
+                loginCredentials = { email: validUser.email, password: validUser.password };
+            }
+        }
+        // Generate and write the test as before
         const testCode = await (0, openai_1.generatePlaywrightTest)({
             jiraTitle: title,
             jiraDescription: description,
@@ -308,12 +341,10 @@ async function handleFromJiraCommand() {
         console.log('\nGenerated Playwright Test:\n');
         console.log(testCode);
         if (writeMode === 'new') {
-            // Write full test file
             fs_1.default.writeFileSync(absPath, testCode, 'utf8');
             console.log(`\nTest file created: ${absPath}`);
         }
         else {
-            // Append only the test() block
             const testBlockMatch = testCode.match(/(test\s*\(.*[\s\S]*)/);
             if (testBlockMatch) {
                 fs_1.default.appendFileSync(absPath, '\n' + testBlockMatch[1], 'utf8');
@@ -321,6 +352,19 @@ async function handleFromJiraCommand() {
             }
             else {
                 console.error('Could not find a test() block to append.');
+            }
+        }
+        // Automatically run the test after creation
+        try {
+            console.log(`\nRunning: PWDEBUG=1 npx playwright test ${absPath}\n`);
+            (0, child_process_1.execSync)(`PWDEBUG=1 npx playwright test ${absPath}`, { stdio: 'inherit' });
+        }
+        catch (err) {
+            if (err instanceof Error) {
+                console.error('Error running the test:', err.message);
+            }
+            else {
+                console.error('Error running the test:', err);
             }
         }
     }

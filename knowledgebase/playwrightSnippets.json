@@ -1,0 +1,32 @@
+{
+  "login": {
+    "description": "Canonical Playwright login workflow using real selectors and valid credentials.",
+    "snippet": [
+      "await page.goto('<ENV_URL>');",
+      "await page.fill('input[name=\"username\"]', '<USER_EMAIL>');",
+      "await page.fill('input[name=\"password\"]', '<USER_PASSWORD>');",
+      "await page.click('button[type=\"submit\"]');",
+      "await page.waitForNavigation();",
+      "if (await page.isVisible('#vpro-media-product-selector-btn')) { await page.click('#vpro-media-product-selector-btn'); }",
+      "await expect(page.locator('.vcreative-icon')).toBeVisible();"
+    ]
+  },
+  "spotCreation": {
+    "description": "Canonical Playwright spot creation workflow using real selectors and spotPresets.valid.",
+    "snippet": [
+      "await page.click(\"ul[root='true'] span\");",
+      "await page.click(\"text=Select an Adtype\");",
+      "await page.click(`li[aria-label='${spotData.adType}'] span`);",
+      "await page.fill(\"input[placeholder='Client or Advertiser']\", spotData.client);",
+      "await page.click(\"li[role='option'] span\");",
+      "await page.fill(\"input[name='card_spot_title']\", spotData.title);",
+      "await page.fill(\"input[name='card_spot_isci']\", spotData.isci);",
+      "await page.fill(\"input[name='card_spot_length']\", spotData.length);",
+      "await page.fill(\"input[name='card_spot_rotation']\", spotData.rotation);",
+      "await page.fill(\"input[name='card_spot_contract']\", spotData.contract);",
+      "await page.setInputFiles(\"input[type='file']\", spotData.filePath);",
+      "await page.click(\"button:has-text('Save Spot')\");"
+    ],
+    "spotPreset": "valid"
+  }
+}

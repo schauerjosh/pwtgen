@@ -166,6 +166,19 @@ npx ts-node src/embed_articles.ts
 ```
 This will regenerate `article_embeddings.json` with improved accuracy for CLI and semantic search.
 
+## Mock Data Usage for Playwright Test Generation
+- Mock data files for all supported entities are located in `src/mock-data/`.
+- Only the `valid` preset is used for each entity (e.g., `buildAdtypeData()`, `buildFirmData()`, etc.).
+- The CLI/OpenAI logic calls the builder function for each entity and passes the resulting JSON object as mock data, never the file contents.
+- Mock data is only included in the test generation prompt if the Jira card requests that specific data point (via required entities).
+- Supported mock entities: adtype, firm, spot, spot-voices, spotFile, spotJobs, station, user.
+
+**Example usage in code:**
+```typescript
+import { buildAdtypeData } from './mock-data/adtype-mock';
+const adtypeData = buildAdtypeData(); // returns valid adtype mock as JSON
+```
+
 ## Build & Commit
 After making changes, run:
 ```bash

@@ -8,7 +8,6 @@ const config_1 = require("./config");
 const openai_1 = require("openai");
 const actions_json_1 = __importDefault(require("../knowledgebase/actions.json"));
 const playwrightSnippets_json_1 = __importDefault(require("../knowledgebase/playwrightSnippets.json"));
-const spotPresets_1 = require("./spotPresets");
 const adtype_mock_1 = require("./mock-data/adtype-mock");
 const firm_mock_1 = require("./mock-data/firm-mock");
 const spot_mock_1 = require("./mock-data/spot-mock");
@@ -33,13 +32,14 @@ function getPlaywrightStepsForActions(actions) {
 }
 function getCanonicalPlaywrightSteps(action, context = {}) {
     if (action === 'login') {
-        return playwrightSnippets_json_1.default.login.snippet.map(s => s.replace('<ENV_URL>', context.testDomain || '')
+        // Always use canonical login snippet and interpolate ENV_URL, USER_EMAIL, USER_PASSWORD
+        return playwrightSnippets_json_1.default.login.snippet.map(s => s.replace('<ENV_URL>', context.testDomain || process.env.TEST_DOMAIN || '')
             .replace('<USER_EMAIL>', context.loginCredentials?.email || '')
             .replace('<USER_PASSWORD>', context.loginCredentials?.password || '')).join('\n');
     }
     if (action === 'spotCreation') {
-        // Use spotPresets.valid if no spotData provided
-        const spotData = context.spotData || spotPresets_1.spotPresets.valid;
+        // Always use canonical spot creation snippet and valid mock data
+        const spotData = context.spotData || {};
         return playwrightSnippets_json_1.default.spotCreation.snippet.map(s => {
             return s
                 .replace('${spotData.adType}', spotData.metadata?.adtype_id || spotData.adtype_id || '')
@@ -54,7 +54,7 @@ function getCanonicalPlaywrightSteps(action, context = {}) {
     }
     return '';
 }
-async function generatePlaywrightTest({ jiraTitle, jiraDescription, acceptanceCriteria, ragResults, requiredEntities, mockData, sourceContext, testDomain, loginCredentials, spotData }) {
+async function generatePlaywrightTest({ jiraTitle, jiraDescription, acceptanceCriteria, ragResults, requiredEntities, mockData, sourceContext, testDomain, loginCredentials, spotData, devResponse }) {
     // Only use selectors and workflows from top RAG results
     let actionsToRun = [];
     if (ragResults && ragResults.length) {
@@ -92,25 +92,39 @@ async function generatePlaywrightTest({ jiraTitle, jiraDescription, acceptanceCr
         if (requiredEntities.includes('user'))
             entityMockData.user = (0, user_mock_1.buildUserData)();
     }
-    let playwrightSteps = '';
-    for (const action of actionsToRun) {
-        playwrightSteps += getCanonicalPlaywrightSteps(action, { testDomain, loginCredentials, spotData: entityMockData.spot }) + '\n';
-    }
-    let prompt = `You are an expert Playwright test author. Write a production-quality Playwright test in TypeScript for the following JIRA card and business workflow. Use the provided selectors, workflows, and valid user credentials. Output only the Playwright test code (no markdown fences, no code block markers, no triple backticks).
-`;
+    // Strict canonical snippet injection
+    const loginSnippet = playwrightSnippets_json_1.default.login.snippet.map(s => s.replace('<ENV_URL>', testDomain || process.env.TEST_DOMAIN || '')
+        .replace('<USER_EMAIL>', loginCredentials?.email || '')
+        .replace('<USER_PASSWORD>', loginCredentials?.password || '')).join('\n');
+    const spotSnippet = playwrightSnippets_json_1.default.spotCreation.snippet.map(s => {
+        const spot = entityMockData.spot || spotData || {};
+        return s
+            .replace('${spotData.adType}', spot.metadata?.adtype_id || spot.adtype_id || '')
+            .replace('spotData.client', spot.metadata?.client_id || spot.client_id || '')
+            .replace('spotData.title', spot.spot_title || '')
+            .replace('spotData.isci', spot.metadata?.draft_id || spot.isci || '')
+            .replace('spotData.length', spot.metadata?.spot_length || spot.length || '')
+            .replace('spotData.rotation', spot.metadata?.rotationpercent || spot.rotation || '')
+            .replace('spotData.contract', spot.metadata?.contractno || spot.contract || '')
+            .replace('spotData.filePath', spot.metadata?.spot_files?.[0]?.file_name || 'valid_file_1.mp4');
+    }).join('\n');
+    let prompt = `You are an expert Playwright test author. Write a production-quality Playwright test in TypeScript for the following JIRA card and business workflow.\n`;
     prompt += `JIRA Title: ${jiraTitle}\nJIRA Description: ${jiraDescription}`;
     if (acceptanceCriteria)
         prompt += `\nAcceptance Criteria: ${acceptanceCriteria}`;
+    if (devResponse)
+        prompt += `\nDeveloper Response: ${devResponse}`;
     if (testDomain)
         prompt += `\nTest Domain: ${testDomain}`;
     if (loginCredentials)
         prompt += `\nLogin Credentials: ${JSON.stringify(loginCredentials)}`;
-    // Only include mock data for requested entities
     Object.keys(entityMockData).forEach(entity => {
         prompt += `\n${entity.charAt(0).toUpperCase() + entity.slice(1)} Data: ${JSON.stringify(entityMockData[entity])}`;
     });
-    prompt += `\nUse these Playwright steps and selectors for the workflow:\n${playwrightSteps}`;
-    prompt += `\nWrite a Playwright test that automates login, spot creation, file upload, email sending, and verification as described. Use only the provided selectors and workflows. Output only the Playwright test code. Do NOT include markdown code block markers or triple backticks.`;
+    prompt += `\nUse ONLY the following canonical Playwright code blocks for login and spot creation. Do NOT use generic or manual steps.\n`;
+    prompt += `\nCanonical Login Workflow:\n${loginSnippet}\n`;
+    prompt += `\nCanonical Spot Creation Workflow:\n${spotSnippet}\n`;
+    prompt += `\nIf other business actions are required, use only canonical workflows and selectors from the knowledge base. Output only the Playwright test code. Do NOT include markdown code block markers or triple backticks.`;
     const completion = await openai.chat.completions.create({
         model: 'gpt-4o',
         temperature: 0.1,

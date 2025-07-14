@@ -1,5 +1,5 @@
 import { config } from './config';
-import { exec } from 'child_process';
+import { exec, execSync } from 'child_process';
 import inquirer from 'inquirer';
 import { fetchJiraIssue } from './jira';
 import { generatePlaywrightTest } from './openai';
@@ -297,7 +297,42 @@ export async function handleFromJiraCommand() {
       console.log(`  [${i+1}] ${res.title}`);
     });
     console.log('====================================================\n');
-    console.log('Generating Playwright test using OpenAI...');
+
+    // Prompt for test file path and write mode before generating the test
+    const { testFilePath, mode } = await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'testFilePath',
+        message: 'Path to save the Playwright test file:',
+        default: 'playwright/test/test-1'
+      },
+      {
+        type: 'list',
+        name: 'mode',
+        message: 'Write mode:',
+        choices: [
+          { name: 'Create new file', value: 'new' },
+          { name: 'Append to existing file', value: 'append' }
+        ],
+        default: 'new'
+      }
+    ]);
+    absPath = path.resolve(testFilePath);
+    writeMode = mode;
+
+    // Load loginUsers from knowledgebase and use a valid user
+    let loginUsers = [];
+    try {
+      loginUsers = JSON.parse(fs.readFileSync(path.join(__dirname, '../knowledgebase/loginUsers.json'), 'utf8'));
+    } catch {}
+    if (loginDetected && loginUsers.length) {
+      const validUser = loginUsers.find((u: any) => u.isValid);
+      if (validUser) {
+        loginCredentials = { email: validUser.email, password: validUser.password };
+      }
+    }
+
+    // Generate and write the test as before
     const testCode = await generatePlaywrightTest({
       jiraTitle: title,
       jiraDescription: description,
@@ -313,17 +348,27 @@ export async function handleFromJiraCommand() {
     console.log('\nGenerated Playwright Test:\n');
     console.log(testCode);
     if (writeMode === 'new') {
-      // Write full test file
       fs.writeFileSync(absPath, testCode, 'utf8');
       console.log(`\nTest file created: ${absPath}`);
     } else {
-      // Append only the test() block
       const testBlockMatch = testCode.match(/(test\s*\(.*[\s\S]*)/);
       if (testBlockMatch) {
         fs.appendFileSync(absPath, '\n' + testBlockMatch[1], 'utf8');
         console.log(`\nTest block appended to: ${absPath}`);
       } else {
         console.error('Could not find a test() block to append.');
+      }
+    }
+
+    // Automatically run the test after creation
+    try {
+      console.log(`\nRunning: PWDEBUG=1 npx playwright test ${absPath}\n`);
+      execSync(`PWDEBUG=1 npx playwright test ${absPath}`, { stdio: 'inherit' });
+    } catch (err) {
+      if (err instanceof Error) {
+        console.error('Error running the test:', err.message);
+      } else {
+        console.error('Error running the test:', err);
       }
     }
   } catch (err: any) {

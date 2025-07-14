@@ -132,7 +132,12 @@ export async function generatePlaywrightTest({
   if (acceptanceCriteria) prompt += `\nAcceptance Criteria: ${acceptanceCriteria}`;
   if (devResponse) prompt += `\nDeveloper Response: ${devResponse}`;
   if (testDomain) prompt += `\nTest Domain: ${testDomain}`;
-  if (loginCredentials) prompt += `\nLogin Credentials: ${JSON.stringify(loginCredentials)}`;
+  if (loginCredentials) {
+    prompt += `\nLogin Credentials: ${JSON.stringify(loginCredentials)}`;
+    prompt += `\nIMPORTANT: The following email and password will be used for login in the test. Please verify and use exactly these values:`;
+    prompt += `\nEmail: ${loginCredentials.email}`;
+    prompt += `\nPassword: ${loginCredentials.password}`;
+  }
   Object.keys(entityMockData).forEach(entity => {
     prompt += `\n${entity.charAt(0).toUpperCase() + entity.slice(1)} Data: ${JSON.stringify(entityMockData[entity])}`;
   });

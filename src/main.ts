@@ -121,9 +121,8 @@ export async function handleFromJiraCommand() {
         choices: ENV_OPTIONS
       }
     ]);
-    // Fix type for env and testDomain
-    const envKey: keyof typeof ENV_URLS = env;
-    const testDomain = ENV_URLS[envKey];
+    // env is now the actual URL, not a key
+    const testDomain = env;
 
     // --- Extract numbered steps from description ---
     let stepQueries: string[] = [];
@@ -236,12 +235,19 @@ export async function handleFromJiraCommand() {
     // Detect login requirement from card
     const loginDetected = /login|sign in|log in|authenticate|as [\w ]+/i.test(cardText);
     let loginCredentials = undefined;
+    // Always use loginUsers.json if login is detected
     if (loginDetected) {
-      // Use provided valid user
-      loginCredentials = {
-        email: 'imail-test+DemoProdDirector@vcreativeinc.com',
-        password: 'OneVCTeam2023!',
-      };
+      let loginUsers = [];
+      try {
+        loginUsers = JSON.parse(fs.readFileSync(path.join(__dirname, '../knowledgebase/loginUsers.json'), 'utf8'));
+      } catch {}
+      const validUser = loginUsers.find((u: any) => u.isValid && u.email && u.password);
+      if (validUser) {
+        loginCredentials = { email: validUser.email, password: validUser.password };
+      } else {
+        console.warn('No valid login user found in loginUsers.json. Please update the file with a valid user.');
+        loginCredentials = { email: 'imail-test+DemoProdDirector@vcreativeinc.com', password: 'OneVCTeam2023!' };
+      }
     }
 
     // --- Prompt for source code context ---
@@ -326,10 +332,18 @@ export async function handleFromJiraCommand() {
       loginUsers = JSON.parse(fs.readFileSync(path.join(__dirname, '../knowledgebase/loginUsers.json'), 'utf8'));
     } catch {}
     if (loginDetected && loginUsers.length) {
-      const validUser = loginUsers.find((u: any) => u.isValid);
+      // Use the first valid user, and warn if none found
+      const validUser = loginUsers.find((u: any) => u.isValid && u.email && u.password);
       if (validUser) {
         loginCredentials = { email: validUser.email, password: validUser.password };
+      } else {
+        console.warn('No valid login user found in loginUsers.json. Please update the file with a valid user.');
+        loginCredentials = { email: 'imail-test+DemoProdDirector@vcreativeinc.com', password: 'OneVCTeam2023!' };
       }
+    }
+    // Warn if testDomain is missing
+    if (!testDomain) {
+      console.warn('No environment URL selected. Please select a valid environment.');
     }
 
     // Generate and write the test as before
@@ -347,11 +361,51 @@ export async function handleFromJiraCommand() {
     });
     console.log('\nGenerated Playwright Test:\n');
     console.log(testCode);
+    // Before writing the test, scan and replace login/spot creation blocks
+    let finalTestCode = testCode;
+    const canonicalLogin = require('../knowledgebase/playwrightSnippets.json').login.snippet.map((s: string) =>
+      s.replace('<ENV_URL>', testDomain)
+       .replace('<USER_EMAIL>', loginCredentials?.email || '')
+       .replace('<USER_PASSWORD>', loginCredentials?.password || '')
+    ).join('\n');
+    const canonicalSpot = require('../knowledgebase/playwrightSnippets.json').spotCreation.snippet.map((s: string) =>
+      s.replace('${spotData.adType}', spotData?.adType || '')
+       .replace('spotData.client', spotData?.client || '')
+       .replace('spotData.title', spotData?.title || '')
+       .replace('spotData.isci', spotData?.isci || '')
+       .replace('spotData.length', spotData?.length || '')
+       .replace('spotData.rotation', spotData?.rotation || '')
+       .replace('spotData.contract', spotData?.contract || '')
+       .replace('spotData.filePath', 'valid_file_1.mp4')
+    ).join('\n');
+    // Replace login block
+    finalTestCode = finalTestCode.replace(/\/\/ Canonical Login Workflow[\s\S]*?await expect\(page\.locator\('\.vcreative-icon'\)\)\.toBeVisible\(\);/, `// Canonical Login Workflow\n${canonicalLogin}`);
+    // Replace spot creation block
+    finalTestCode = finalTestCode.replace(/\/\/ Canonical Spot Creation Workflow[\s\S]*?await page\.click\("button:has-text\('Save Spot'\)"\);/, `// Canonical Spot Creation Workflow\n${canonicalSpot}`);
+    // Confirm with developer
+    console.log('\n=== CREDENTIALS AND CANONICAL CODE TO BE USED ===');
+    console.log('Login Email:', loginCredentials?.email);
+    console.log('Login Password:', loginCredentials?.password);
+    console.log('\nCanonical Login Code:\n', canonicalLogin);
+    console.log('\nCanonical Spot Creation Code:\n', canonicalSpot);
+    const { confirmWrite } = await inquirer.prompt([
+      {
+        type: 'confirm',
+        name: 'confirmWrite',
+        message: 'Do you confirm these credentials and canonical code will be used in the test?',
+        default: true
+      }
+    ]);
+    if (!confirmWrite) {
+      console.log('Test file not written. Please update credentials or code and retry.');
+      return;
+    }
+    // Write the test file
     if (writeMode === 'new') {
-      fs.writeFileSync(absPath, testCode, 'utf8');
+      fs.writeFileSync(absPath, finalTestCode, 'utf8');
       console.log(`\nTest file created: ${absPath}`);
     } else {
-      const testBlockMatch = testCode.match(/(test\s*\(.*[\s\S]*)/);
+      const testBlockMatch = finalTestCode.match(/(test\s*\(.*[\s\S]*)/);
       if (testBlockMatch) {
         fs.appendFileSync(absPath, '\n' + testBlockMatch[1], 'utf8');
         console.log(`\nTest block appended to: ${absPath}`);

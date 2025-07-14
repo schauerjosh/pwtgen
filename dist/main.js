@@ -23,6 +23,8 @@ const ENV_URLS = {
     qa: 'https://qa.vcreative.net/',
     local: 'http://localhost:4200',
 };
+// Ensure useMockData is defined
+let useMockData = false;
 function getActionSteps(actionName) {
     const found = actions_json_1.default.find((a) => a.action.toLowerCase().includes(actionName.toLowerCase()));
     return found ? found.steps : [];
@@ -56,6 +58,11 @@ async function semanticSearch(query, topN = 3) {
         score
     }));
 }
+// Ensure requiredEntities, mockData, absPath, writeMode are always defined
+let requiredEntities = [];
+let mockData = {};
+let absPath = '';
+let writeMode = 'new';
 async function handleFromJiraCommand() {
     // Prompt for Jira ticket number only
     const { jiraTicket } = await inquirer_1.default.prompt([
@@ -110,10 +117,26 @@ async function handleFromJiraCommand() {
         }
         // --- Query RAG for each step if numbered steps exist ---
         let stepRagResults = [];
+        // Add verbose flag
+        const { verbose } = await inquirer_1.default.prompt([
+            {
+                type: 'confirm',
+                name: 'verbose',
+                message: 'Enable verbose debug output for semantic search?',
+                default: false
+            }
+        ]);
         if (stepQueries.length) {
             for (const step of stepQueries) {
-                const results = await semanticSearch(step, 2);
-                stepRagResults.push(...results);
+                // Scan all articles, print top 20-50 results if verbose
+                const results = await semanticSearch(step, 50);
+                if (verbose) {
+                    console.log(`\nSemantic search for step: "${step}"`);
+                    results.forEach((res, i) => {
+                        console.log(`  [${i + 1}] ${res.title}\n  Score: ${res.score?.toFixed(3) || ''}\n  Content: ${res.content?.slice(0, 200) || ''}...`);
+                    });
+                }
+                stepRagResults.push(...results.slice(0, 5)); // Use top 5 for aggregation
             }
         }
         // --- Composite RAG results: combine step results and main query ---
@@ -125,7 +148,7 @@ async function handleFromJiraCommand() {
         if (detectedActions.length) {
             compositeQuery += '\n' + detectedActions.join('\n');
         }
-        const ragResults = (await semanticSearch(compositeQuery, 5)).map((res) => ({
+        const ragResults = (await semanticSearch(compositeQuery, 50)).map((res) => ({
             title: res.title,
             url: res.url,
             content: res.content.slice(0, 500),
@@ -137,116 +160,39 @@ async function handleFromJiraCommand() {
                 acc.push(curr);
             return acc;
         }, []);
-        allRagResults.forEach((res, i) => {
-            console.log(`  [${i + 1}] ${res.title}\n  URL: ${res.url}\n  Score: ${res.score?.toFixed(3) || ''}\n  Content: ${res.content?.slice(0, 500) || ''}...`);
-        });
-        // --- Step: Detect required entities from card ---
-        const entityKeywords = [
-            { key: 'spot', regex: /spot|spot data|spot info/i },
-            { key: 'user', regex: /user|login as|sign in as|authenticate as/i },
-            { key: 'station', regex: /station|broadcast station/i },
-            { key: 'firm', regex: /firm|firm id/i },
-            { key: 'adtype', regex: /adtype|ad type/i }
-        ];
-        const requiredEntities = entityKeywords.filter(e => e.regex.test(cardText)).map(e => e.key);
-        if (requiredEntities.length) {
-            console.log(`\nEntities required for this test (detected from card): ${requiredEntities.join(', ')}`);
+        if (verbose) {
+            console.log('\nTop aggregated RAG results:');
+            allRagResults.forEach((res, i) => {
+                console.log(`  [${i + 1}] ${res.title}\n  URL: ${res.url}\n  Score: ${res.score?.toFixed(3) || ''}\n  Content: ${res.content?.slice(0, 200) || ''}...`);
+            });
         }
-        else {
-            console.log('\nNo specific entities detected from card.');
-        }
-        // --- Step: Prompt for mock data usage ---
-        let useMockData = false;
-        if (requiredEntities.length) {
-            const { mockChoice } = await inquirer_1.default.prompt([
+        // --- Strict prompt construction and fallback ---
+        const requiredSelectors = allRagResults.filter((r) => /selector|workflow|playwright|approval|dubbed|checkbox|hover|order|spot/i.test(r.content));
+        if (requiredSelectors.length < stepQueries.length) {
+            console.log('\nNot enough information found in the knowledge base to generate a reliable test.');
+            const { recordNow } = await inquirer_1.default.prompt([
                 {
                     type: 'confirm',
-                    name: 'mockChoice',
-                    message: `Do you want to use mock data for the required entities (${requiredEntities.join(', ')})?`,
+                    name: 'recordNow',
+                    message: 'Would you like to record the workflow manually using Playwright recorder?',
                     default: true
                 }
             ]);
-            useMockData = mockChoice;
-        }
-        // --- Step: Load mock data if chosen ---
-        let mockData = {};
-        if (useMockData) {
-            // Only use spotPresets.valid for spot, and similar for other entities
-            try {
-                if (requiredEntities.includes('spot')) {
-                    const { spotPresets } = require('../app/mock-data/spot-mock');
-                    mockData.spot = spotPresets.valid;
-                    console.log('\nUsing mock spot data (spotPresets.valid):', mockData.spot);
-                }
-                if (requiredEntities.includes('user')) {
-                    const { userPresets } = require('../app/mock-data/user-mock');
-                    mockData.user = userPresets.valid;
-                    console.log('\nUsing mock user data (userPresets.valid):', mockData.user);
-                }
-                if (requiredEntities.includes('station')) {
-                    const { stationPresets } = require('../app/mock-data/station-mock');
-                    mockData.station = stationPresets.valid;
-                    console.log('\nUsing mock station data (stationPresets.valid):', mockData.station);
-                }
-                if (requiredEntities.includes('firm')) {
-                    const { firmPresets } = require('../app/mock-data/firm-mock');
-                    mockData.firm = firmPresets.valid;
-                    console.log('\nUsing mock firm data (firmPresets.valid):', mockData.firm);
-                }
-                if (requiredEntities.includes('adtype')) {
-                    const { adtypePresets } = require('../app/mock-data/adtype-mock');
-                    mockData.adtype = adtypePresets.valid;
-                    console.log('\nUsing mock adtype data (adtypePresets.valid):', mockData.adtype);
-                }
+            if (recordNow) {
+                await handleRecordCommand();
+                return;
             }
-            catch (err) {
-                console.log('Error loading mock data:', err);
+            else {
+                console.log('Please update the knowledge base or provide more details.');
+                return;
             }
         }
-        // --- Step: Prompt for file location for Playwright test ---
-        const { testPath: userTestPath } = await inquirer_1.default.prompt([
-            {
-                type: 'input',
-                name: 'testPath',
-                message: 'Path to save the Playwright test file:',
-                default: path_1.default.join('tests', `${jiraTicket}.spec.ts`),
-                validate: (input) => input ? true : 'Test file path is required.'
-            }
-        ]);
-        // Ensure .test.ts is appended
-        const testPath = userTestPath.endsWith('.test.ts') ? userTestPath : `${userTestPath.replace(/(\.spec)?(\.ts)?$/, '')}-test.test.ts`;
-        const absPath = path_1.default.resolve(testPath);
-        let writeMode = 'new';
-        if (fs_1.default.existsSync(absPath)) {
-            const { append } = await inquirer_1.default.prompt([
-                {
-                    type: 'confirm',
-                    name: 'append',
-                    message: `File ${testPath} exists. Append to it? (No will overwrite)`,
-                    default: true
-                }
-            ]);
-            writeMode = append ? 'append' : 'new';
-        }
-        fs_1.default.mkdirSync(path_1.default.dirname(absPath), { recursive: true });
-        // --- Step: Prompt for any specific data needed ---
-        // If not using mock data, prompt for manual entry for each required entity
-        if (!useMockData && requiredEntities.length) {
-            for (const entity of requiredEntities) {
-                const { entityData } = await inquirer_1.default.prompt([
-                    {
-                        type: 'input',
-                        name: 'entityData',
-                        message: `Enter data for required entity (${entity}) or leave blank to skip:`,
-                        default: ''
-                    }
-                ]);
-                mockData[entity] = entityData || undefined;
-            }
-        }
-        // --- Always run semantic search (RAG) on the full card text ---
-        console.log('\nRunning semantic search over knowledge base for relevant business actions...');
-        const ragResultsFull = await semanticSearch(cardText, 3);
+        const ragResultsFull = (await semanticSearch(cardText, 50)).map((res) => ({
+            title: res.title,
+            url: res.url,
+            content: res.content.slice(0, 500),
+            score: res.score
+        }));
         ragResultsFull.forEach((res, i) => {
             console.log(`  [${i + 1}] ${res.title}\n  URL: ${res.url}\n  Score: ${res.score.toFixed(3)}\n  Content: ${res.content.slice(0, 300)}...`);
         });
@@ -569,18 +515,28 @@ async function handleRecordCommand() {
         console.log('\nUsing mock spot data files.');
         // Optionally copy or reference mock files here
     }
-    const { testPath: rawTestPath } = await inquirer_1.default.prompt([
+    // Prompt for test file path and write mode
+    const { testFilePath, mode } = await inquirer_1.default.prompt([
         {
             type: 'input',
-            name: 'testPath',
-            message: 'Path to save the test file:',
-            default: 'tests/generated',
-            validate: (input) => input ? true : 'Test file path is required.'
+            name: 'testFilePath',
+            message: 'Path to save the Playwright test file:',
+            default: 'playwright/test/test-1'
+        },
+        {
+            type: 'list',
+            name: 'mode',
+            message: 'Write mode:',
+            choices: [
+                { name: 'Create new file', value: 'new' },
+                { name: 'Append to existing file', value: 'append' }
+            ],
+            default: 'new'
         }
     ]);
-    // Ensure .test.ts is appended
-    const testPath = rawTestPath.endsWith('.test.ts') ? rawTestPath : `${rawTestPath}.test.ts`;
-    await recordPlaywrightTest(url, testPath);
+    absPath = path_1.default.resolve(testFilePath);
+    writeMode = mode;
+    await recordPlaywrightTest(url, absPath);
     // Prompt to run the test
     const { runTest } = await inquirer_1.default.prompt([
         {
@@ -593,8 +549,8 @@ async function handleRecordCommand() {
     if (runTest) {
         const { execSync } = require('child_process');
         try {
-            console.log(`\nRunning: PWDEBUG=1 npx playwright test ${testPath}\n`);
-            execSync(`PWDEBUG=1 npx playwright test ${testPath}`, { stdio: 'inherit' });
+            console.log(`\nRunning: PWDEBUG=1 npx playwright test ${absPath}\n`);
+            execSync(`PWDEBUG=1 npx playwright test ${absPath}`, { stdio: 'inherit' });
         }
         catch (err) {
             if (err instanceof Error) {

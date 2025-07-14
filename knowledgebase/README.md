@@ -27,12 +27,13 @@ This project automates Playwright test generation for vProMedia using a Retrieva
 ### 1. Generate Playwright Test (`pwtgen from-jira`)
 1. **Run CLI:** `pwtgen from-jira`
 2. **JIRA Ticket:** Enter the JIRA ticket number.
-3. **Knowledge Base Search:** CLI parses card, extracts actions/roles, and queries the knowledge base for guidance on each step.
-4. **Entity Detection:** CLI detects required entities (spot, user, station, firm, adtype) from card text.
-5. **Mock Data Prompt:** Developer chooses to use mock data or provide specific data for each entity.
-6. **Test File Location:** Enter the file path to save the Playwright test.
-7. **Summary:** CLI displays a summary of all choices, detected entities, and data used.
-8. **Test Generation:** Playwright test is generated using all gathered context and saved to the specified location.
+3. **Environment Selection:** Choose the environment (prod, qa, twotest, smoke, local) for the test.
+4. **Knowledge Base Search:** CLI parses the card, extracts actions/roles, and queries the knowledge base for relevant workflows (login, spot creation, POC assignment, file upload, email, etc.).
+5. **Entity Detection:** CLI detects required entities (spot, user, station, firm, adtype) from card text and auto-selects sensible defaults when possible.
+6. **Mock Data Prompt:** Developer chooses to use mock data or provide specific data for each entity.
+7. **Test File Location:** Enter the file path to save the Playwright test.
+8. **Summary:** CLI displays a clear summary of all choices, detected actions/entities, and what will be generated.
+9. **Test Generation:** Playwright test is generated using all gathered context, business workflows, and saved to the specified location.
 
 ### 2. Record Playwright Test (`pwtgen record`)
 - **Purpose:** Launches an interactive browser session to record user actions and generate Playwright test code, optionally linked to a JIRA card.

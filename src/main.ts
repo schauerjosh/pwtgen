@@ -79,82 +79,70 @@ export async function handleFromJiraCommand() {
     const acceptanceCriteria = issue.fields.customfield_10031 ? JSON.stringify(issue.fields.customfield_10031) : undefined;
     console.log(`\nTitle of ${jiraTicket}: ${title}`);
 
-    // Prompt for source code context
-    const { sourcePaths } = await inquirer.prompt([
-      {
-        type: 'input',
-        name: 'sourcePaths',
-        message: 'Enter relative paths to source code files/folders for UI selectors/components (comma-separated):',
-        default: 'src/',
-        filter: (input) => input.split(',').map((s: string) => s.trim()).filter(Boolean)
-      }
-    ]);
-    let sourceContext = '';
-    for (const relPath of sourcePaths) {
-      try {
-        const absPath = path.resolve(relPath);
-        if (fs.existsSync(absPath)) {
-          if (fs.lstatSync(absPath).isDirectory()) {
-            const files = fs.readdirSync(absPath).filter(f => f.endsWith('.ts') || f.endsWith('.tsx') || f.endsWith('.js'));
-            for (const file of files) {
-              sourceContext += `\n// File: ${file}\n` + fs.readFileSync(path.join(absPath, file), 'utf8');
-            }
-          } else {
-            sourceContext += `\n// File: ${relPath}\n` + fs.readFileSync(absPath, 'utf8');
-          }
-        }
-      } catch {}
-    }
-
-    // Detect login in description/acceptance criteria
-    const loginDetected = /login|sign in|log in|authenticate/i.test(description + (acceptanceCriteria || ''));
-    let loginCredentials = undefined;
-    if (loginDetected) {
-      loginCredentials = await inquirer.prompt([
-        {
-          type: 'input',
-          name: 'username',
-          message: 'Login detected. Enter username to use in the test:',
-          default: 'testuser'
-        },
-        {
-          type: 'input',
-          name: 'password',
-          message: 'Enter password to use in the test:',
-          default: 'password123'
-        }
-      ]);
-    }
-
-    // Prompt for domain to run the Playwright test at
-    const { testDomain } = await inquirer.prompt([
-      {
-        type: 'input',
-        name: 'testDomain',
-        message: 'Enter the domain/URL where this Playwright test should run:',
-        default: 'https://example.com'
-      }
-    ]);
-
-    // --- New: Extract actions/roles from card description and acceptance criteria ---
     const cardText = `${title}\n${description}\n${acceptanceCriteria || ''}`;
-    // Example: extract phrases like "log in as ...", "as ...", "navigate to ...", "select ..."
-    const actionRegex = /(log in as [\w ]+|as [A-Za-z ]+|navigate to [\w ]+|select [\w ]+)/gi;
-    const actionsFound = Array.from(cardText.matchAll(actionRegex)).map(m => m[0]);
-    if (actionsFound.length) {
-      console.log('\nDetected actions/roles in card:');
-      actionsFound.forEach((a, i) => console.log(`  [${i+1}] ${a}`));
-      // For each action, query the knowledge base
-      for (const action of actionsFound) {
-        console.log(`\nSearching knowledge base for: "${action}" ...`);
-        const results = await semanticSearch(action, 2);
-        results.forEach((res, i) => {
-          console.log(`  [${i+1}] ${res.title}\n  URL: ${res.url}\n  Score: ${res.score.toFixed(3)}\n  Content: ${res.content.slice(0, 300)}...`);
-        });
+
+    // --- Prompt for environment selection instead of full URL ---
+    const ENV_OPTIONS = [
+      { name: 'Production', value: ENV_URLS.prod },
+      { name: 'QA', value: ENV_URLS.qa },
+      { name: 'Smoke', value: ENV_URLS.smoke },
+      { name: 'TwoTest', value: ENV_URLS.twotest },
+      { name: 'Local', value: ENV_URLS.local }
+    ];
+    const { env } = await inquirer.prompt([
+      {
+        type: 'list',
+        name: 'env',
+        message: 'Select the environment to run the Playwright test:',
+        choices: ENV_OPTIONS
       }
-    } else {
-      console.log('\nNo explicit actions/roles detected in card.');
+    ]);
+    // Fix type for env and testDomain
+    const envKey: keyof typeof ENV_URLS = env;
+    const testDomain = ENV_URLS[envKey];
+
+    // --- Extract numbered steps from description ---
+    let stepQueries: string[] = [];
+    if (description) {
+      // Match lines starting with a number and a dot (e.g., '1. Log in')
+      const stepLines = description.split(/\n|\r/).filter(line => /^\d+\.\s+/.test(line));
+      if (stepLines.length) {
+        stepQueries = stepLines.map(line => line.replace(/^\d+\.\s+/, '').trim());
+      }
     }
+
+    // --- Query RAG for each step if numbered steps exist ---
+    let stepRagResults: any[] = [];
+    if (stepQueries.length) {
+      for (const step of stepQueries) {
+        const results = await semanticSearch(step, 2);
+        stepRagResults.push(...results);
+      }
+    }
+
+    // --- Composite RAG results: combine step results and main query ---
+    let compositeQuery = cardText;
+    const actionKeywords = [
+      'login', 'sign in', 'authenticate', 'create spot', 'quick order', 'qo', 'file upload', 'attach file', 'send email', 'notes', 'assign poc', 'verify email', 'export', 'spot review'
+    ];
+    const detectedActions = actionKeywords.filter(kw => new RegExp(kw, 'i').test(cardText));
+    if (detectedActions.length) {
+      compositeQuery += '\n' + detectedActions.join('\n');
+    }
+    const ragResults = (await semanticSearch(compositeQuery, 5)).map((res: any) => ({
+      title: res.title,
+      url: res.url,
+      content: res.content.slice(0, 500),
+      score: res.score
+    }));
+    // Merge and deduplicate RAG results
+    const allRagResults = [...stepRagResults, ...ragResults].reduce((acc: any[], curr: any) => {
+      if (!acc.some((r: any) => r.title === curr.title)) acc.push(curr);
+      return acc;
+    }, []);
+    allRagResults.forEach((res: any, i: number) => {
+      console.log(`  [${i+1}] ${res.title}\n  URL: ${res.url}\n  Score: ${res.score?.toFixed(3) || ''}\n  Content: ${res.content?.slice(0, 500) || ''}...`);
+    });
 
     // --- Step: Detect required entities from card ---
     const entityKeywords = [
@@ -221,7 +209,7 @@ export async function handleFromJiraCommand() {
     }
 
     // --- Step: Prompt for file location for Playwright test ---
-    const { testPath } = await inquirer.prompt([
+    const { testPath: userTestPath } = await inquirer.prompt([
       {
         type: 'input',
         name: 'testPath',
@@ -230,7 +218,22 @@ export async function handleFromJiraCommand() {
         validate: (input) => input ? true : 'Test file path is required.'
       }
     ]);
+    // Ensure .test.ts is appended
+    const testPath = userTestPath.endsWith('.test.ts') ? userTestPath : `${userTestPath.replace(/(\.spec)?(\.ts)?$/, '')}-test.test.ts`;
     const absPath = path.resolve(testPath);
+    let writeMode: 'new' | 'append' = 'new';
+    if (fs.existsSync(absPath)) {
+      const { append } = await inquirer.prompt([
+        {
+          type: 'confirm',
+          name: 'append',
+          message: `File ${testPath} exists. Append to it? (No will overwrite)`,
+          default: true
+        }
+      ]);
+      writeMode = append ? 'append' : 'new';
+    }
+    fs.mkdirSync(path.dirname(absPath), { recursive: true });
 
     // --- Step: Prompt for any specific data needed ---
     // If not using mock data, prompt for manual entry for each required entity
@@ -248,64 +251,117 @@ export async function handleFromJiraCommand() {
       }
     }
 
-    // --- Step: Display summary to developer ---
-    console.log('\nSummary:');
+    // --- Always run semantic search (RAG) on the full card text ---
+    console.log('\nRunning semantic search over knowledge base for relevant business actions...');
+    const ragResultsFull = await semanticSearch(cardText, 3);
+    ragResultsFull.forEach((res, i) => {
+      console.log(`  [${i+1}] ${res.title}\n  URL: ${res.url}\n  Score: ${res.score.toFixed(3)}\n  Content: ${res.content.slice(0, 300)}...`);
+    });
+
+    // Detect spot creation requirement from card
+    const spotCreationDetected = /create (a )?spot|quick order|qo/i.test(cardText);
+    let spotData = {
+      adType: 'Radio Commercial',
+      client: 'Dairy Queen - Taber',
+      title: 'JS - PLAYWRIGHT TEST',
+      isci: '1234',
+      status: 'Needs Producing',
+      length: '30',
+      rotation: '100',
+      station: 'CHBW-FM B94',
+      contract: '12312322',
+      spotRequiresApproval: true,
+      cartId: '5252',
+    };
+    // Detect login requirement from card
+    const loginDetected = /login|sign in|log in|authenticate|as [\w ]+/i.test(cardText);
+    let loginCredentials = undefined;
+    if (loginDetected) {
+      // Use provided valid user
+      loginCredentials = {
+        email: 'imail-test+DemoProdDirector@vcreativeinc.com',
+        password: 'OneVCTeam2023!',
+      };
+    }
+
+    // --- Prompt for source code context ---
+    const { sourcePaths } = await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'sourcePaths',
+        message: 'Enter relative paths to source code files/folders for UI selectors/components (comma-separated):',
+        default: 'src/',
+        filter: (input) => input.split(',').map((s: string) => s.trim()).filter(Boolean)
+      }
+    ]);
+    let sourceContext = '';
+    for (const relPath of sourcePaths) {
+      try {
+        const absPath = path.resolve(relPath);
+        if (fs.existsSync(absPath)) {
+          if (fs.lstatSync(absPath).isDirectory()) {
+            const files = fs.readdirSync(absPath).filter(f => f.endsWith('.ts') || f.endsWith('.tsx') || f.endsWith('.js'));
+            for (const file of files) {
+              sourceContext += `\n// File: ${file}\n` + fs.readFileSync(path.join(absPath, file), 'utf8');
+            }
+          } else {
+            sourceContext += `\n// File: ${relPath}\n` + fs.readFileSync(absPath, 'utf8');
+          }
+        }
+      } catch {}
+    }
+
+    // --- Streamlined summary and instructions ---
+    console.log('\n========= Playwright Test Generation Summary =========');
     console.log(`JIRA Ticket: ${jiraTicket}`);
-    console.log(`Test file location: ${absPath}`);
+    console.log(`Title: ${title}`);
     if (requiredEntities.length) {
-      console.log(`Required entities: ${requiredEntities.join(', ')}`);
+      console.log(`Detected Entities: ${requiredEntities.join(', ')}`);
       if (useMockData) {
         console.log('Using mock data for entities.');
       } else {
         console.log('Using provided data for entities.');
       }
+    } else {
+      console.log('No specific entities detected.');
     }
-
-    // Generate Playwright test using OpenAI
-    console.log('\nGenerating Playwright test using OpenAI...');
+    if (spotCreationDetected) {
+      console.log('Spot creation workflow will be included.');
+    }
+    if (loginDetected && loginCredentials) {
+      console.log(`Login workflow will use: ${loginCredentials.email}`);
+    }
+    console.log(`Environment: ${testDomain}`);
+    console.log('Top RAG results:');
+    allRagResults.forEach((res: any, i: number) => {
+      console.log(`  [${i+1}] ${res.title}`);
+    });
+    console.log('====================================================\n');
+    console.log('Generating Playwright test using OpenAI...');
     const testCode = await generatePlaywrightTest({
+      jiraTitle: title,
+      jiraDescription: description,
+      acceptanceCriteria,
+      ragResults: allRagResults,
+      requiredEntities,
+      mockData,
       sourceContext,
-      testDomain
+      testDomain,
+      loginCredentials,
+      spotData
     });
     console.log('\nGenerated Playwright Test:\n');
     console.log(testCode);
-
-    // Prompt for file path
-    const defaultPath = path.join('tests', `${jiraTicket}.spec.ts`);
-    const { testPath: finalTestPath } = await inquirer.prompt([
-      {
-        type: 'input',
-        name: 'testPath',
-        message: 'Path to save the test file:',
-        default: defaultPath,
-        validate: (input) => input ? true : 'Test file path is required.'
-      }
-    ]);
-    const finalAbsPath = path.resolve(finalTestPath);
-    let writeMode: 'new' | 'append' = 'new';
-    if (fs.existsSync(finalAbsPath)) {
-      const { append } = await inquirer.prompt([
-        {
-          type: 'confirm',
-          name: 'append',
-          message: `File ${finalTestPath} exists. Append to it? (No will overwrite)`,
-          default: true
-        }
-      ]);
-      writeMode = append ? 'append' : 'new';
-    }
-    // Ensure directory exists
-    fs.mkdirSync(path.dirname(finalAbsPath), { recursive: true });
     if (writeMode === 'new') {
       // Write full test file
-      fs.writeFileSync(finalAbsPath, testCode, 'utf8');
-      console.log(`\nTest file created: ${finalAbsPath}`);
+      fs.writeFileSync(absPath, testCode, 'utf8');
+      console.log(`\nTest file created: ${absPath}`);
     } else {
       // Append only the test() block
       const testBlockMatch = testCode.match(/(test\s*\(.*[\s\S]*)/);
       if (testBlockMatch) {
-        fs.appendFileSync(finalAbsPath, '\n' + testBlockMatch[1], 'utf8');
-        console.log(`\nTest block appended to: ${finalAbsPath}`);
+        fs.appendFileSync(absPath, '\n' + testBlockMatch[1], 'utf8');
+        console.log(`\nTest block appended to: ${absPath}`);
       } else {
         console.error('Could not find a test() block to append.');
       }
@@ -370,7 +426,7 @@ async function recordPlaywrightTest(url: string, testPath: string) {
   });
 }
 
-async function handleRecordCommand() {
+export async function handleRecordCommand() {
   console.log('\nINSTRUCTIONS:');
   console.log('1. You will select the environment and specify the file location for your Playwright test.');
   console.log('2. A browser window will open to the selected environment URL.');
@@ -555,5 +611,3 @@ async function handleRecordCommand() {
     }
   }
 }
-
-module.exports = { handleRecordCommand };

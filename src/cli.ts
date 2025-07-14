@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
-const { handleRecordCommand } = require('./main');
-import { handleFromJiraCommand } from './main';
+import { handleRecordCommand, handleFromJiraCommand } from './main';
 
 const program = new Command();
 

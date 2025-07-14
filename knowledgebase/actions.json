@@ -37,5 +37,27 @@
       "Verify the email contains a link to the file",
       "Open the link in a new tab and ensure the file plays correctly"
     ]
+  },
+  {
+    "action": "assign POC to spot",
+    "steps": [
+      "Search for spot with jobUnassigned: 'Producer'",
+      "Find the 'Producer' job in the POC column",
+      "Click the parent 'poc-job-container' element",
+      "Type the assignee name (e.g., 'demo prod director') in the search field",
+      "Click the dropdown item to assign",
+      "Verify the job-completed field shows the assigned name (e.g., 'Demo Prod Director')"
+    ],
+    "playwright": [
+      "await page.fill('input#spot_title', spotData.title);",
+      "await page.click('button[id=\"do-search-btn\"] span');",
+      "await page.waitForTimeout(5000);",
+      "const pocCell = await page.locator('td.poc-column').filter({ hasText: 'Producer' });",
+      "await pocCell.locator('.poc-job-title').click();",
+      "await page.fill('.search-field', 'demo prod director');",
+      "await page.click('.ui-dropdown-item');",
+      "await page.waitForTimeout(1000);",
+      "await expect(pocCell.locator('div[appuser].job-completed')).toHaveText('Demo Prod Director');"
+    ]
   }
 ]

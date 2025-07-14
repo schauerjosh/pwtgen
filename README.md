@@ -153,10 +153,30 @@ pwtgen mcp:record
 - Open the generated test file in your repo and review the code.
 - Run the test using Playwright as you would any other test.
 
-### Troubleshooting
-- If the browser does not launch, ensure Playwright is installed and your environment is set up.
-- If you see port errors, make sure no other MCP server is running on the selected port.
-- For API errors, check your `.env` for a valid OpenAI key.
+## Embedding & Semantic Search Enhancements
+- The embedding script now extracts and embeds relevant keywords/tags (selectors, workflows, business actions, synonyms like "as Demo" for login) for each article.
+- Content is normalized and deduplicated for more accurate embeddings.
+- Tags/metadata are stored with embeddings for improved custom scoring and filtering.
+- Synonym expansion ensures queries like "login as Demo" are matched accurately.
+
+### How to Update Embeddings
+Run the following command to refresh embeddings after updating knowledge base articles:
+```bash
+npx ts-node src/embed_articles.ts
+```
+This will regenerate `article_embeddings.json` with improved accuracy for CLI and semantic search.
+
+## Build & Commit
+After making changes, run:
+```bash
+npm run build
+```
+Then commit and push your changes:
+```bash
+git add .
+git commit -m "Update semantic search and RAG logic"
+git push
+```
 
 ## Security
 - Your `.env` file is never committed (see `.gitignore`)

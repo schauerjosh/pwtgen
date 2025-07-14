@@ -48,10 +48,25 @@ function cosineSimilarity(a, b) {
 }
 async function semanticSearch(query, topN = 3) {
     const queryEmbedding = await getQueryEmbedding(query);
-    const scored = article_embeddings_json_1.default.map((item, idx) => ({
-        idx,
-        score: cosineSimilarity(queryEmbedding, item.embedding)
-    }));
+    // Keywords to boost
+    const boostKeywords = [
+        'playwright', 'selector', 'workflow', 'order', 'spot', 'approval', 'dubbed', 'checkbox', 'hover', 'POC', 'test', 'automation', 'business action'
+    ];
+    const scored = article_embeddings_json_1.default.map((item, idx) => {
+        let score = cosineSimilarity(queryEmbedding, item.embedding);
+        const articleContent = articles_json_1.default[idx].content.toLowerCase();
+        // Boost score if keywords are present
+        for (const kw of boostKeywords) {
+            if (articleContent.includes(kw)) {
+                score += 0.15; // Boost value, tune as needed
+            }
+        }
+        // Extra boost for Playwright code blocks
+        if (/playwright.*test\s*\(/i.test(articleContent)) {
+            score += 0.2;
+        }
+        return { idx, score };
+    });
     scored.sort((a, b) => b.score - a.score);
     return scored.slice(0, topN).map(({ idx, score }) => ({
         ...articles_json_1.default[idx],

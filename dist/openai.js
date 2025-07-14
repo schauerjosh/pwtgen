@@ -22,14 +22,19 @@ function getPlaywrightStepsForActions(actions) {
     return steps;
 }
 async function generatePlaywrightTest({ jiraTitle, jiraDescription, acceptanceCriteria, ragResults, requiredEntities, mockData, sourceContext, testDomain, loginCredentials, spotData }) {
-    // Extract relevant actions from the JIRA description
-    const actionsToRun = [
-        'login as Demo Prod Director',
-        'create spot with file attachment',
-        'send email from notes section',
-        'verify email notification',
-        'assign POC to spot'
-    ];
+    // Only use selectors and workflows from top RAG results
+    let actionsToRun = [];
+    if (ragResults && ragResults.length) {
+        for (const res of ragResults) {
+            if (/playwright|selector|workflow|order|spot|approval|dubbed|checkbox|hover|POC/i.test(res.content)) {
+                actionsToRun.push(res.content);
+            }
+        }
+    }
+    // Fallback if not enough coverage
+    if (!actionsToRun.length) {
+        return '// Not enough RAG coverage. Please use the Playwright recorder for manual workflow.';
+    }
     const playwrightSteps = getPlaywrightStepsForActions(actionsToRun);
     let prompt = `You are an expert Playwright test author. Write a production-quality Playwright test in TypeScript for the following JIRA card and business workflow. Use the provided selectors, workflows, and valid user credentials. Output only the Playwright test code (no markdown fences, no code block markers, no triple backticks).
 `;

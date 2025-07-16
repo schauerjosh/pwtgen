@@ -120,6 +120,7 @@ export class JiraClient {
 
   private parseAcceptanceCriteria(text: string): string[] {
     const criteria: string[] = [];
+    if (!text || typeof text !== 'string') return criteria;
 
     const patterns = [
       /(?:Given|When|Then|And|But)\s+(.+?)(?=\n|$)/gi,
@@ -129,10 +130,18 @@ export class JiraClient {
     ];
 
     for (const pattern of patterns) {
-      const matches = text.matchAll(pattern);
-      for (const match of matches) {
-        if (match[1]?.trim()) {
-          criteria.push(match[1].trim());
+      // Use match instead of matchAll for compatibility
+      const matches = text.match(pattern);
+      if (matches) {
+        for (const match of matches) {
+          // Extract the actual criteria text using the pattern
+          const groupMatch = pattern.exec(match);
+          if (groupMatch && groupMatch[1]?.trim()) {
+            criteria.push(groupMatch[1].trim());
+          } else if (typeof match === 'string') {
+            // Fallback: push the match itself if no group
+            criteria.push(match.trim());
+          }
         }
       }
     }

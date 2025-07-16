@@ -102,17 +102,32 @@ export class VectraRAGService {
   async query(text: string, topK = 15, minScore = 0.3): Promise<RAGContext[]> {
     await this.init();
 
+    if (!text || text.trim().length < 3) {
+      logger.warn('Query text is empty or too short.');
+      return [];
+    }
+
     try {
       const queryEmbedding = await this.generateEmbedding(text);
       const results = await this.index.queryItems(queryEmbedding, topK);
 
       if (!results || results.length === 0) {
-        logger.warn('No results found in knowledge base');
+        logger.warn('No results found in knowledge base for query:', text);
         return [];
       }
 
-      return results
-        .filter(result => result.score >= minScore)
+      let filtered = results.filter(result => result.score >= minScore);
+      if (filtered.length === 0) {
+        logger.info(`No results above minScore=${minScore}. Lowering threshold to 0.1 and retrying filter.`);
+        filtered = results.filter(result => result.score >= 0.1);
+      }
+      if (filtered.length === 0) {
+        logger.info('Still no results above 0.1. Returning topK results regardless of score.');
+        filtered = results;
+      }
+
+      logger.info(`Returning ${filtered.length} results for query: ${text}`);
+      return filtered
         .map(result => ({
           id: result.item.metadata.id as string,
           content: result.item.metadata.content as string,

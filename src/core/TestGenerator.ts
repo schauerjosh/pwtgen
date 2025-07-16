@@ -33,7 +33,7 @@ export class TestGenerator {
 
     let finalPath = config.outputPath;
     if (!config.dryRun) {
-      finalPath = await this.writeTestFile(config.outputPath, formattedCode, config.overwrite);
+      finalPath = await this.writeTestFile(config.outputPath, formattedCode, !!config.overwrite);
     }
 
     const result: GeneratedTest & { content: string } = {
@@ -103,7 +103,7 @@ WAITING STRATEGY:
 Key: ${config.ticket.key}
 Summary: ${config.ticket.summary}
 Description: ${config.ticket.description}
-${config.ticket.acceptanceCriteria ? `Acceptance Criteria:\n${config.ticket.acceptanceCriteria.map(c => `- ${c}`).join('\n')}` : ''}`;
+${config.ticket.acceptanceCriteria ? `Acceptance Criteria:\n${config.ticket.acceptanceCriteria.map((c: string) => `- ${c}`).join('\n')}` : ''}`;
 
     const configSection = `\n\nCONFIGURATION:
 Environment: ${config.environment}

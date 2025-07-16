@@ -1,0 +1,42 @@
+export type Environment = 'dev' | 'qa' | 'staging' | 'prod';
+
+export interface JiraTicket {
+  key: string;
+  summary: string;
+  description: string;
+  acceptanceCriteria?: string[];
+  assignee?: string;
+  status?: string;
+  priority?: string;
+}
+
+export const JiraTicketSchema = {
+  parse: (ticket: JiraTicket) => ticket, // Dummy implementation for now
+};
+
+export interface TestConfig {
+  ticket: JiraTicket;
+  environment: Environment;
+  outputPath: string;
+  overwrite?: boolean;
+  dryRun?: boolean;
+  pageObjectPattern?: boolean;
+}
+
+export interface RAGContext {
+  id: string;
+  content: string;
+  type: 'selector' | 'workflow' | 'pattern' | 'fixture' | string;
+  score: number;
+  metadata?: Record<string, any>;
+}
+
+export interface GeneratedTest {
+  filePath: string;
+  testName: string;
+  ticket: JiraTicket;
+  environment: Environment;
+  generatedAt: string;
+  ragContexts: RAGContext[];
+  confidence: number;
+}

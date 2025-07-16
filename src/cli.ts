@@ -10,7 +10,7 @@ import { JiraClient } from './jira/JiraClient.js';
 import { VectraRAGService } from './rag/VectraRAGService.js';
 import { validateConfig } from './utils/validation.js';
 import { logger } from './utils/logger.js';
-import type { TestConfig, Environment } from './types/index.js';
+import type { TestConfig, Environment } from './types';
 
 config();
 

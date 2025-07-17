@@ -27,7 +27,7 @@ program
   .alias('gen')
   .description('Generate Playwright test from Jira ticket')
   .option('-t, --ticket <key>', 'Jira ticket key (e.g., PROJ-123)')
-  .option('-e, --env <environment>', 'Target environment', 'dev')
+  .option('-e, --env <environment>', 'Target environment', 'test')
   .option('-o, --output <path>', 'Output file path')
   .option('--overwrite', 'Overwrite existing test file', false)
   .option('--dry-run', 'Generate test without writing to file', false)
@@ -78,8 +78,8 @@ async function buildTestConfig(options: any): Promise<TestConfig> {
         type: 'list',
         name: 'environment',
         message: 'Select target environment:',
-        choices: ['dev', 'qa', 'staging', 'prod'],
-        default: 'dev',
+        choices: ['test', 'qa', 'staging', 'prod'],
+        default: 'test',
         when: !options.env
       },
       {

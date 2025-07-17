@@ -160,3 +160,108 @@ class QuickOrderPage {
   }
 }
 ```
+
+## Login Flow (QA Environment)
+```typescript
+// Best Practice: Use getByRole for login fields and buttons
+// Use test.step for clear test structure
+import { expect, test } from '@playwright/test';
+
+test('Successful login', async ({ page }) => {
+    await test.step('Navigate to the login page', async () => {
+        await page.goto('https://qa.vcreative.net/login');
+    });
+
+    await test.step('Enter valid credentials', async () => {
+        await page.getByRole('textbox', { name: /email/i }).fill(email);
+        await page.getByRole('textbox', { name: /password/i }).fill(password);
+    });
+
+    await test.step('Submit the login form', async () => {
+        await page.getByRole('button', { name: /login/i }).click();
+    });
+
+    await test.step('Wait for home page and click media selector', async () => {
+        await Promise.all([
+            page.waitForURL('**/vpro/home', { timeout: 240_000 }),
+            page.locator('#vpro-media-product-selector-btn').click({ timeout: 240_000 })
+        ]);
+    });
+});
+
+// Invalid login example
+
+test('Invalid login shows error message', async ({ page }) => {
+    await test.step('Navigate to the login page', async () => {
+        await page.goto('/login');
+    });
+
+    await test.step('Enter invalid credentials', async () => {
+        await page.getByRole('textbox', { name: /email/i }).fill('wronguser@vcreativeinc.com');
+        await page.getByRole('textbox', { name: /password/i }).fill('wrongpassword');
+    });
+
+    await test.step('Submit the login form', async () => {
+        await page.getByRole('button', { name: /login/i }).click();
+    });
+
+    await test.step('Verify error message appears', async () => {
+        const errorMessage = page.locator('.ui-toast-message-content');
+        await expect(errorMessage).toBeVisible();
+        await expect(errorMessage).toHaveText(/invalid user/i);
+    });
+});
+
+test.afterEach(async ({ page }, testInfo) => {
+    if (testInfo.status !== testInfo.expectedStatus) {
+        await page.screenshot({ path: `screenshots/${testInfo.title}.png`, fullPage: true });
+    }
+});
+
+**Note:**
+- Always use `getByRole` for login fields and buttons for robust selectors.
+- Use `test.step` for clear, maintainable test structure.
+- Take screenshots on failure for easier debugging.
+```
+
+## Playwright Test Structure (Best Practice)
+
+**Keywords:** playwright, test.step, invalid login, error message, screenshot, afterEach, robust selectors, login, authentication, credentials, failure handling, timeout, test.setTimeout
+
+```typescript
+import { expect, test } from '@playwright/test';
+
+test.setTimeout(240_000); // Best practice: set a large timeout for all tests
+
+test('Invalid login shows error message', async ({ page }) => {
+    await test.step('Navigate to the login page', async () => {
+        await page.goto('/');
+    });
+
+    await test.step('Enter invalid credentials', async () => {
+        await page.fill('input[name="username"]', 'wronguser@vcreativeinc.com');
+        await page.fill('input[name="password"]', 'wrongpassword');
+    });
+
+    await test.step('Submit the login form', async () => {
+        await page.click('button:text("Login")');
+    });
+
+    await test.step('Verify error message appears', async () => {
+        const errorMessage = page.locator('.ui-toast-message-content');
+        await expect(errorMessage).toBeVisible();
+        await expect(errorMessage).toHaveText(/invalid user/i);
+    });
+});
+
+// Configure the test to take a screenshot on failure for all tests
+// Keywords: screenshot, afterEach, failure, testInfo
+
+test.afterEach(async ({ page }, testInfo) => {
+    if (testInfo.status !== testInfo.expectedStatus) {
+        await page.screenshot({ path: `screenshots/${testInfo.title}.png`, fullPage: true });
+    }
+});
+```
+
+**Note:** Always use `test.setTimeout(240_000)` or higher for Playwright tests to avoid premature failures due to slow environments. Use `test.step` for clear structure and capture screenshots on failure using `afterEach`.

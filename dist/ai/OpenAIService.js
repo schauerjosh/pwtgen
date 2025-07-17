@@ -45,8 +45,12 @@ export class OpenAIService {
         let cleaned = code.replace(/```(?:typescript|ts|javascript|js)?\n?/g, '');
         cleaned = cleaned.replace(/```$/g, '');
         cleaned = cleaned.trim();
-        if (!cleaned.includes("import { test, expect }")) {
-            cleaned = "import { test, expect } from '@playwright/test';\n\n" + cleaned;
+        // Always inject alphabetically sorted imports for Playwright
+        if (!cleaned.includes("import { expect, test }")) {
+            // Remove any existing unsorted import for test/expect
+            cleaned = cleaned.replace(/import \{\s*test,\s*expect\s*\} from '@playwright\/test';?\n?/g, '');
+            cleaned = cleaned.replace(/import \{\s*expect,\s*test\s*\} from '@playwright\/test';?\n?/g, '');
+            cleaned = "import { expect, test } from '@playwright/test';\n\n" + cleaned;
         }
         return cleaned;
     }

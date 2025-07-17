@@ -1,11 +1,17 @@
 // src/rag/VectraRAGService.ts
 import { readdir, readFile, mkdir, writeFile } from 'fs/promises';
-import { join, extname } from 'path';
+import { fileURLToPath } from 'url';
+import { dirname, join, extname } from 'path';
 import { LocalIndex } from 'vectra';
 import { pipeline } from '@xenova/transformers';
 import { logger } from '../utils/logger.js';
-const KB_PATH = 'knowledge-base';
-const INDEX_PATH = '.vectra-index';
+// Get the directory of this file (src/rag/VectraRAGService.ts)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+// Root of the CLI repo (assume src/ is one level down)
+const REPO_ROOT = join(__dirname, '../..');
+const KB_PATH = join(REPO_ROOT, 'knowledge-base');
+const INDEX_PATH = join(REPO_ROOT, '.vectra-index');
 const EMB_MODEL = 'Xenova/all-MiniLM-L6-v2';
 export class VectraRAGService {
     index;
@@ -95,7 +101,7 @@ export class VectraRAGService {
         }
         try {
             const queryEmbedding = await this.generateEmbedding(text);
-            const results = await this.index.queryItems(queryEmbedding, topK);
+            const results = await this.index.queryItems(queryEmbedding, text, topK);
             if (!results || results.length === 0) {
                 logger.warn('No results found in knowledge base for query:', text);
                 return [];
@@ -226,8 +232,8 @@ category: authentication
 ## Code Example
 \`\`\`typescript
 await page.goto(process.env.BASE_URL + '/login');
-await page.getByLabel('Username').fill(process.env.TEST_USERNAME!);
-await page.getByLabel('Password').fill(process.env.TEST_PASSWORD!);
+await page.getByLabel('Username').fill('imail-test+DemoProdDirector@vcreativeinc.com');
+await page.getByLabel('Password').fill('OneVCTeam2023!');
 await page.getByRole('button', { name: /sign in/i }).click();
 await expect(page.getByRole('heading', { name: /dashboard/i })).toBeVisible();
 \`\`\`

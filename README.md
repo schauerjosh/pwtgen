@@ -69,6 +69,13 @@ pwtgen embed
 - `knowledge-base/workflows/`: Workflow steps and code (e.g., authentication.md)
 - `knowledge-base/patterns/`: Common Playwright patterns (e.g., common-patterns.md)
 
+## Knowledge Base and Embedding Index Location
+
+- The CLI always uses the knowledge base and vector index embedded in its own repository directory.
+- You do **not** need to run `pwtgen embed` in every consumer repo. The CLI will always reference its own `knowledge-base/` and `.vectra-index/`.
+- If you update or extend the knowledge base, run `pwtgen embed` **once** in the CLI repo to rebuild the embeddings.
+- Consumer projects do not need to copy or re-embed the knowledge base.
+
 ## Example: Authentication Workflow
 See `knowledge-base/workflows/authentication.md` for a standard login flow and code example.
 

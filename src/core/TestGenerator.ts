@@ -27,6 +27,23 @@ export class TestGenerator {
     const ragContexts = await this.retrieveContext(config);
     logger.info(`Retrieved ${ragContexts.length} relevant contexts`);
 
+    // Force-include best-practices context for login/error tests
+    const isLoginTest = /login|authentication|credentials|error message|invalid/i.test(
+      config.ticket.summary + config.ticket.description + (config.ticket.acceptanceCriteria || []).join(' ')
+    );
+    const hasBestPractices = ragContexts.some(ctx => ctx.content.includes('getByRole') && ctx.content.includes('test.step'));
+    if (isLoginTest && !hasBestPractices) {
+      const fs = await import('fs/promises');
+      const bestPractices = await fs.readFile('knowledge-base/patterns/playwright-best-practices.md', 'utf8');
+      ragContexts.push({
+        id: 'best-practices',
+        content: bestPractices,
+        type: 'pattern',
+        score: 1.0,
+      });
+      logger.info('Appended best-practices context for login/error test');
+    }
+
     const generatedCode = await this.generateTestCode(config, ragContexts);
     const formattedCode = await this.formatter.format(generatedCode);
     const confidence = this.calculateConfidence(ragContexts, generatedCode);
@@ -108,7 +125,7 @@ ${config.ticket.acceptanceCriteria ? `Acceptance Criteria:\n${config.ticket.acce
     const configSection = `\n\nCONFIGURATION:
 Environment: ${config.environment}
 Page Objects: ${config.pageObjectPattern ? 'enabled' : 'disabled'}
-Base URL: process.env.${config.environment.toUpperCase()}_BASE_URL`;
+Base URL: Use the selected environment's base URL directly (e.g., "${getBaseUrl(config.environment)}") instead of process.env.TEST_BASE_URL`;
 
     const instructionSection = `\n\nINSTRUCTIONS:
 Generate a complete Playwright test that:
@@ -118,8 +135,21 @@ Generate a complete Playwright test that:
 4. Includes comprehensive assertions for each step
 5. Handles authentication using environment variables
 6. Is resilient to timing issues and UI changes
+7. Use the test.step structure for each logical step in the test
+8. For login flows, always use getByRole for email, password, and login fields/buttons as shown in the best practices context
+9. For invalid login, verify error message and do not redirect
+10. Take a screenshot on failure using test.afterEach as shown in best practices context
+\n\nReturn ONLY the TypeScript test code, no explanations.`;
 
-Return ONLY the TypeScript test code, no explanations.`;
+    function getBaseUrl(env: string): string {
+      switch (env) {
+        case 'prod': return 'http://localhost:4200';
+        case 'test': return 'https://two-test.vcreative.net';
+        case 'qa': return 'https://qa.vcreative.net';
+        case 'staging': return 'https://smoketest.vcreative.net';
+        default: return '';
+      }
+    }
 
     return systemPrompt + contextSection + ticketSection + configSection + instructionSection;
   }
@@ -193,5 +223,15 @@ Return ONLY the TypeScript test code, no explanations.`;
     }
 
     return testPath;
+  }
+}
+
+export function getBaseUrl(env: string): string {
+  switch (env) {
+    case 'prod': return 'http://localhost:4200';
+    case 'test': return 'https://two-test.vcreative.net';
+    case 'qa': return 'https://qa.vcreative.net';
+    case 'staging': return 'https://smoketest.vcreative.net';
+    default: return '';
   }
 }

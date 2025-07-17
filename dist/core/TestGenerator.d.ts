@@ -16,4 +16,5 @@ export declare class TestGenerator {
     private writeTestFile;
     private getUniqueFilePath;
 }
+export declare function getBaseUrl(env: string): string;
 //# sourceMappingURL=TestGenerator.d.ts.map

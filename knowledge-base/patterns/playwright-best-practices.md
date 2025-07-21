@@ -125,7 +125,7 @@ await retryOperation(async () => {
 // Use environment variables for configuration
 const baseUrl = process.env.BASE_URL || 'https://two-test.vcreative.net';
 const testUser = process.env.TEST_EMAIL || 'imail-test+CypressTestUser@vcreativeinc.com';
-const testPassword = process.env.TEST_PASSWORD || 'OneVCTeam2023!';
+const testPassword = process.env.TEST_PASSWORD || 'TeamVC#Rocks2025';
 ```
 
 ## Page Object Pattern

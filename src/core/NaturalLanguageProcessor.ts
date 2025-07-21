@@ -1,8 +1,7 @@
-
 // If the file is actually named 'enhancedIndex.ts' (not 'enhanced-index.ts'), update the import path accordingly.
 // Otherwise, create the file '../types/enhanced-index.ts' and export the required types.
 
-import { TicketTestRequest, DeveloperInterventionStep, NaturalLanguageTestResult } from "../types/enhanced-index";
+import { TicketTestRequest, DeveloperInterventionStep, NaturalLanguageTestResult } from "../types/enhanced-index.js";
 
 export class NaturalLanguageProcessor {
   async processTicketRequest(
@@ -11,7 +10,7 @@ export class NaturalLanguageProcessor {
   ): Promise<NaturalLanguageTestResult> {
     
     // Generate test steps based on ticket (this would be more sophisticated in real implementation)
-    let steps: Array<{ description: string; code: string; developerModified?: boolean }> = [
+    const steps: Array<{ description: string; code: string; developerModified?: boolean }> = [
       { 
         description: `Navigate to ${request.environment} environment`, 
         code: `await page.goto('${request.url}');` 
@@ -76,7 +75,10 @@ export class NaturalLanguageProcessor {
     };
   }
 
-  private generatePlaywrightTest(request: any, steps: any[]): string {
+  private generatePlaywrightTest(
+    request: TicketTestRequest & { description: string; url: string; environment: string; testName: string },
+    steps: Array<{ description: string; code: string; developerModified?: boolean }>
+  ): string {
     const imports = `import { test, expect } from '@playwright/test';`;
     
     const testHeader = `

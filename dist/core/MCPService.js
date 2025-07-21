@@ -1,4 +1,4 @@
-import { NaturalLanguageProcessor } from './NaturalLanguageProcessor';
+import { NaturalLanguageProcessor } from './NaturalLanguageProcessor.js';
 export class MCPService {
     nlp;
     constructor() {

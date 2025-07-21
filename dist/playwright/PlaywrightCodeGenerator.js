@@ -14,7 +14,6 @@ export class PlaywrightCodeGenerator {
             const file = readFileSync(kbPath, 'utf8');
             const match = file.match(/export const validUsers = (\[[\s\S]*?\]);/);
             if (match) {
-                // eslint-disable-next-line no-eval
                 const validUsers = eval(match[1]);
                 let found = null;
                 if (config.ticket && config.ticket.description) {
@@ -29,7 +28,7 @@ export class PlaywrightCodeGenerator {
                 userFromKB = found ? found : validUsers[0];
             }
         }
-        catch (e) {
+        catch {
             // fallback: leave as is
         }
         if (userFromKB) {

@@ -1,5 +1,5 @@
-import { TicketTestRequest, NaturalLanguageTestResult, DeveloperInterventionStep } from '../types/enhanced-index';
-import { NaturalLanguageProcessor } from './NaturalLanguageProcessor';
+import { TicketTestRequest, NaturalLanguageTestResult, DeveloperInterventionStep } from '../types/enhanced-index.js';
+import { NaturalLanguageProcessor } from './NaturalLanguageProcessor.js';
 
 export class MCPService {
   private nlp: NaturalLanguageProcessor;
@@ -27,7 +27,7 @@ export class MCPService {
     };
 
     // Pass only the fields required by NaturalLanguageTestRequest
-    return await this.nlp.processTicketRequest(nlRequest as any, onIntervention);
+    return await this.nlp.processTicketRequest(nlRequest as TicketTestRequest & { description: string; url: string; environment: string; testName: string }, onIntervention);
   }
 
   private async fetchTicketDetails(ticket: string) {

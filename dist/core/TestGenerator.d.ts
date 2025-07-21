@@ -17,4 +17,7 @@ export declare class TestGenerator {
     private getUniqueFilePath;
 }
 export declare function getBaseUrl(env: string): string;
+export declare const TestGeneratorUtils: {
+    getBaseUrl: typeof getBaseUrl;
+};
 //# sourceMappingURL=TestGenerator.d.ts.map

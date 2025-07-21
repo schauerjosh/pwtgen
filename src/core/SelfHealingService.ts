@@ -1,4 +1,4 @@
-import { SelfHealingResult } from '../types/enhanced-index';
+import { SelfHealingResult } from '../types/enhanced-index.js';
 import * as fs from 'fs';
 
 export class SelfHealingService {

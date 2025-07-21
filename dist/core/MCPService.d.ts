@@ -1,4 +1,4 @@
-import { TicketTestRequest, NaturalLanguageTestResult, DeveloperInterventionStep } from '../types/enhanced-index';
+import { TicketTestRequest, NaturalLanguageTestResult, DeveloperInterventionStep } from '../types/enhanced-index.js';
 export declare class MCPService {
     private nlp;
     constructor();

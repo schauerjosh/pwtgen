@@ -81,8 +81,8 @@ export class VectraRAGService {
                     metadata: {
                         id: doc.id,
                         content: doc.text,
-                        type: doc.meta.type,
-                        file: doc.meta.file,
+                        type: typeof doc.meta.type === 'string' ? doc.meta.type : String(doc.meta.type),
+                        file: typeof doc.meta.file === 'string' ? doc.meta.file : String(doc.meta.file),
                         ...doc.meta
                     }
                 });
@@ -132,8 +132,27 @@ export class VectraRAGService {
         }
     }
     async generateEmbedding(text) {
+        if (!this.embed)
+            throw new Error('Embedding model not initialized');
         const result = await this.embed(text);
-        return Array.isArray(result) ? result[0] : result.data;
+        if (Array.isArray(result)) {
+            if (Array.isArray(result[0]))
+                return result[0];
+            return result;
+        }
+        else if (result && typeof result.data === 'object' && Array.isArray(result.data)) {
+            return result.data;
+        }
+        else if (result && Array.isArray(result.data?.[0])) {
+            return result.data[0];
+        }
+        else if (result && typeof result === 'object') {
+            // Fallback: try to find a numeric array in the object
+            const arr = Object.values(result).find(v => Array.isArray(v) && typeof v[0] === 'number');
+            if (arr)
+                return arr;
+        }
+        throw new Error('Unexpected embedding result format: ' + JSON.stringify(result));
     }
     async walkDirectory(dir, fn) {
         try {
@@ -233,7 +252,7 @@ category: authentication
 \`\`\`typescript
 await page.goto(process.env.BASE_URL + '/login');
 await page.getByLabel('Username').fill('imail-test+DemoProdDirector@vcreativeinc.com');
-await page.getByLabel('Password').fill('OneVCTeam2023!');
+await page.getByLabel('Password').fill('TeamVC#Rocks2025');
 await page.getByRole('button', { name: /sign in/i }).click();
 await expect(page.getByRole('heading', { name: /dashboard/i })).toBeVisible();
 \`\`\`

@@ -235,3 +235,6 @@ export function getBaseUrl(env: string): string {
     default: return '';
   }
 }
+
+// Make getBaseUrl available for CLI
+export const TestGeneratorUtils = { getBaseUrl };

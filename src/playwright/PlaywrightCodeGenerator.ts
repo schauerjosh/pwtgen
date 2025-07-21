@@ -1,5 +1,5 @@
 // src/playwright/PlaywrightCodeGenerator.ts
-import type { TestConfig } from '../types';
+import type { TestConfig } from '../types/index.js';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
@@ -14,13 +14,12 @@ export class PlaywrightCodeGenerator {
 
     // Always replace any process.env.TEST_EMAIL, TEST_PASSWORD, TEST_USERNAME in generated code
     const kbPath = join(__dirname, '../../knowledge-base/fixtures/test-users.md');
-    let userFromKB: any = null;
+    let userFromKB: { role: string; email: string; password: string } | null = null;
     try {
       const file = readFileSync(kbPath, 'utf8');
       const match = file.match(/export const validUsers = (\[[\s\S]*?\]);/);
       if (match) {
-        // eslint-disable-next-line no-eval
-        const validUsers = eval(match[1]);
+        const validUsers = eval(match[1]) as Array<{ role: string; email: string; password: string }>;
         let found = null;
         if (config.ticket && config.ticket.description) {
           const desc = config.ticket.description.toLowerCase();
@@ -33,7 +32,7 @@ export class PlaywrightCodeGenerator {
         }
         userFromKB = found ? found : validUsers[0];
       }
-    } catch (e) {
+    } catch {
       // fallback: leave as is
     }
 

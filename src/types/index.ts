@@ -21,6 +21,10 @@ export interface TestConfig {
   overwrite?: boolean;
   dryRun?: boolean;
   pageObjectPattern?: boolean;
+  vCreativeCredentials?: {
+    email: string;
+    password: string;
+  };
 }
 
 export interface RAGContext {
@@ -28,7 +32,7 @@ export interface RAGContext {
   content: string;
   type: 'selector' | 'workflow' | 'pattern' | 'fixture' | string;
   score: number;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface GeneratedTest {

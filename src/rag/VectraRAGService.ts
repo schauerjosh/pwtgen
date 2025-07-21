@@ -3,7 +3,7 @@ import { readdir, readFile, mkdir, writeFile } from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { dirname, join, extname } from 'path';
 import { LocalIndex } from 'vectra';
-import { pipeline } from '@xenova/transformers';
+import { pipeline, type FeatureExtractionPipeline } from '@xenova/transformers';
 import { logger } from '../utils/logger.js';
 import type { RAGContext } from '../types/index.js';
 
@@ -18,7 +18,7 @@ const EMB_MODEL = 'Xenova/all-MiniLM-L6-v2';
 
 export class VectraRAGService {
   private index!: LocalIndex;
-  private embed: any;
+  private embed: FeatureExtractionPipeline | undefined;
   private initialized = false;
 
   async init() {
@@ -52,7 +52,7 @@ export class VectraRAGService {
     await this.init();
     logger.info('🔄 Indexing knowledge-base...');
 
-    const docs: { id: string; text: string; meta: any }[] = [];
+    const docs: { id: string; text: string; meta: Record<string, unknown> }[] = [];
     await this.walkDirectory(KB_PATH, async (file) => {
       if (!this.isSupportedFile(file)) return;
 
@@ -92,8 +92,8 @@ export class VectraRAGService {
           metadata: {
             id: doc.id,
             content: doc.text,
-            type: doc.meta.type,
-            file: doc.meta.file,
+            type: typeof doc.meta.type === 'string' ? doc.meta.type : String(doc.meta.type),
+            file: typeof doc.meta.file === 'string' ? doc.meta.file : String(doc.meta.file),
             ...doc.meta
           }
         });
@@ -137,9 +137,9 @@ export class VectraRAGService {
         .map(result => ({
           id: result.item.metadata.id as string,
           content: result.item.metadata.content as string,
-          type: (result.item.metadata.type as any) || 'unknown',
+          type: (result.item.metadata.type as string) || 'unknown',
           score: result.score,
-          metadata: result.item.metadata as Record<string, any>,
+          metadata: result.item.metadata as Record<string, unknown>,
         }))
         .sort((a, b) => b.score - a.score);
     } catch (error) {
@@ -149,8 +149,21 @@ export class VectraRAGService {
   }
 
   private async generateEmbedding(text: string): Promise<number[]> {
+    if (!this.embed) throw new Error('Embedding model not initialized');
     const result = await this.embed(text);
-    return Array.isArray(result) ? result[0] : result.data;
+    if (Array.isArray(result)) {
+      if (Array.isArray(result[0])) return result[0];
+      return result as number[];
+    } else if (result && typeof result.data === 'object' && Array.isArray(result.data)) {
+      return result.data;
+    } else if (result && Array.isArray(result.data?.[0])) {
+      return result.data[0];
+    } else if (result && typeof result === 'object') {
+      // Fallback: try to find a numeric array in the object
+      const arr = Object.values(result).find(v => Array.isArray(v) && typeof v[0] === 'number');
+      if (arr) return arr as number[];
+    }
+    throw new Error('Unexpected embedding result format: ' + JSON.stringify(result));
   }
 
   private async walkDirectory(dir: string, fn: (file: string) => Promise<void>) {
@@ -181,13 +194,13 @@ export class VectraRAGService {
     return 'fixture';
   }
 
-  private stripFrontMatter(src: string): { clean: string; meta: any } {
+  private stripFrontMatter(src: string): { clean: string; meta: Record<string, unknown> } {
     if (src.startsWith('---')) {
       const parts = src.split(/---\s*\n/);
       if (parts.length >= 3) {
         const frontMatter = parts[1];
         const content = parts.slice(2).join('---\n');
-        const meta: any = {};
+        const meta: Record<string, unknown> = {};
 
         frontMatter.split(/\n/).forEach((line) => {
           const match = line.match(/^(\w+):\s*(.*)$/);
@@ -253,7 +266,7 @@ category: authentication
 \`\`\`typescript
 await page.goto(process.env.BASE_URL + '/login');
 await page.getByLabel('Username').fill('imail-test+DemoProdDirector@vcreativeinc.com');
-await page.getByLabel('Password').fill('OneVCTeam2023!');
+await page.getByLabel('Password').fill('TeamVC#Rocks2025');
 await page.getByRole('button', { name: /sign in/i }).click();
 await expect(page.getByRole('heading', { name: /dashboard/i })).toBeVisible();
 \`\`\`

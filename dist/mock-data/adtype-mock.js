@@ -1,2 +1,2 @@
-"use strict";
+export {};
 //# sourceMappingURL=adtype-mock.js.map

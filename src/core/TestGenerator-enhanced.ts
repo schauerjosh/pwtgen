@@ -1,4 +1,4 @@
-import { NaturalLanguageTestRequest, NaturalLanguageTestResult } from '../types/enhanced-index';
+import { NaturalLanguageTestRequest, NaturalLanguageTestResult } from '../types/enhanced-index.js';
 
 export class TestGenerator {
   async generateFromNaturalLanguage(request: NaturalLanguageTestRequest): Promise<NaturalLanguageTestResult> {

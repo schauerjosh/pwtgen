@@ -3,7 +3,7 @@
 export class NaturalLanguageProcessor {
     async processTicketRequest(request, onIntervention) {
         // Generate test steps based on ticket (this would be more sophisticated in real implementation)
-        let steps = [
+        const steps = [
             {
                 description: `Navigate to ${request.environment} environment`,
                 code: `await page.goto('${request.url}');`

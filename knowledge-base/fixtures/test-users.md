@@ -10,19 +10,19 @@ category: test-data
 export const validUsers = [
   {
     email: "imail-test+DemoProdDirector@vcreativeinc.com",
-    password: "OneVCTeam2023!",
+    password: "TeamVC#Rocks2025",
     role: "Production Director",
     canGhost: false
   },
   {
     email: "imail-test+CypressTestUser@vcreativeinc.com", 
-    password: "OneVCTeam2023!",
+    password: "TeamVC#Rocks2025",
     role: "Test User",
     canGhost: true
   },
   {
     email: "imail-test+DemoTrafficDirector@vcreativeinc.com",
-    password: "OneVCTeam2023!",
+    password: "TeamVC#Rocks2025",
     role: "Traffic Director",
     canGhost: false
   }

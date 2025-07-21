@@ -1,4 +1,4 @@
-import type { TestConfig } from '../types';
+import type { TestConfig } from '../types/index.js';
 export declare class PlaywrightCodeGenerator {
     enhanceGeneratedCode(code: string, config: TestConfig): string;
 }

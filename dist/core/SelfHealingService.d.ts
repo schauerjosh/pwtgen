@@ -1,4 +1,4 @@
-import { SelfHealingResult } from '../types/enhanced-index';
+import { SelfHealingResult } from '../types/enhanced-index.js';
 export declare class SelfHealingService {
     healTestFile(filePath: string): Promise<SelfHealingResult[]>;
 }

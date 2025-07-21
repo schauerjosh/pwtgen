@@ -4,8 +4,8 @@ import inquirer from 'inquirer';
 import chalk from 'chalk';
 import ora from 'ora';
 import { config } from 'dotenv';
-import { MCPService } from './core/MCPService';
-import { SelfHealingService } from './core/SelfHealingService';
+import { MCPService } from './core/MCPService.js';
+import { SelfHealingService } from './core/SelfHealingService.js';
 import * as fs from 'fs';
 import * as path from 'path';
 // Load environment variables from .env

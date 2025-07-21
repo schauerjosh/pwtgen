@@ -1,2 +1,2 @@
-"use strict";
+export {};
 //# sourceMappingURL=spotJobs-mock.js.map

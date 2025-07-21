@@ -93,5 +93,79 @@ See `knowledge-base/workflows/authentication.md` for a standard login flow and c
 - See `docs/environment.md` for environment variable help
 - For issues, open a GitHub issue or consult the documentation
 
+## Dev Intervention & Self-Healing (Phase 2+)
+
+If a generated Playwright test fails during execution:
+1. pwtgen detects the failure and prompts the developer to launch Playwright codegen at the failure point or relevant URL.
+2. The developer manually performs the correct actions in the browser; codegen records these steps.
+3. pwtgen parses the codegen output and merges the new steps into the failing test at the appropriate location.
+4. The fix is annotated as a developer intervention for traceability.
+
+This workflow allows targeted, production-ready manual fixes and ensures tests evolve with real user actions, combining AI and human expertise for robust automation.
+
+## Interactive Dev Intervention Mode
+
+You can now use `pwtgen gen --interactive` to enable step-by-step developer intervention during test generation:
+- For each AI-generated test step, the CLI will prompt you to accept, edit, or skip the suggested code.
+- Edited steps are annotated as developer interventions for traceability.
+- This mode allows you to customize, correct, or skip any part of the generated test before it is finalized.
+
+### Example Usage
+```bash
+pwtgen gen --ticket PROJ-123 --env test --output tests/e2e/proj-123.spec.ts --interactive
+```
+
+You will be prompted for each step:
+- Accept suggested code
+- Edit code (type your own)
+- Skip this step
+
+This feature ensures your Playwright tests are accurate and developer-approved, combining AI speed with human expertise.
+
+## Manual Actions & Playwright Codegen Integration
+
+After interactive dev intervention, you can now record additional manual actions using Playwright codegen:
+- The CLI will prompt you to launch Playwright codegen for the selected environment.
+- Perform any additional actions in the browser; codegen will record these steps.
+- When finished, the CLI will automatically merge the manual steps into your generated test file, annotated as manual interventions.
+
+### Example Workflow
+1. Run interactive generation:
+   ```bash
+   pwtgen gen --ticket PROJ-123 --env test --output tests/e2e/proj-123.spec.ts --interactive
+   ```
+2. After reviewing AI-generated steps, choose to launch codegen when prompted.
+3. Complete manual actions in the browser; codegen saves them to a `.manual.ts` file.
+4. The CLI merges these steps into your test file, under a `// --- Manual Actions ---` section.
+
+This ensures your Playwright tests combine AI, developer, and real user actions for maximum reliability.
+
+## Merging & Annotation of Manual Actions
+
+When you record manual actions via Playwright codegen, pwtgen will:
+- Extract only the relevant test body from the codegen output.
+- Merge these manual steps into your generated test file, under a clearly annotated section (`// --- Manual Actions (recorded via codegen) ---`).
+- Each manual step is marked with `// 🖐️ Manual intervention` for traceability.
+- The final test file is formatted, includes all necessary imports, and is wrapped in a Playwright test block.
+
+This ensures your tests are clean, maintainable, and every developer intervention is easy to identify and review.
+
+## Error Handling, Recovery & Session Management
+
+- If Playwright codegen or any CLI step fails, pwtgen will prompt you to retry or skip, ensuring you never lose progress due to unexpected errors.
+- Session management (coming soon): pwtgen will save your progress to a session file, allowing you to resume interrupted test generation and build tests incrementally.
+- Improved CLI instructions and help messages guide you through each step for a smoother developer experience.
+
+These enhancements make the workflow resilient, developer-friendly, and ready for real-world usage.
+
+## Testing, Validation & Production Readiness
+
+- Unit and integration tests should be written for CLI commands, dev intervention logic, codegen merging, and error handling.
+- Validate output test files with Playwright to ensure correctness and reliability.
+- Performance optimizations and security reviews are recommended, especially for handling credentials and API tokens.
+- After release, gather developer feedback and iterate to improve the workflow and user experience.
+
+pwtgen is now ready for production use, with a robust, developer-friendly, and extensible workflow for Playwright test generation.
+
 ---
 For technical architecture and workflow diagrams, see `docs/architecture.md`.

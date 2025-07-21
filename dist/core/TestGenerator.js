@@ -203,4 +203,6 @@ export function getBaseUrl(env) {
         default: return '';
     }
 }
+// Make getBaseUrl available for CLI
+export const TestGeneratorUtils = { getBaseUrl };
 //# sourceMappingURL=TestGenerator.js.map

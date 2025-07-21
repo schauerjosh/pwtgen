@@ -1,2 +1,2 @@
-"use strict";
+export {};
 //# sourceMappingURL=embed_templates.js.map

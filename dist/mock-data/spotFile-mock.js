@@ -1,2 +1,2 @@
-"use strict";
+export {};
 //# sourceMappingURL=spotFile-mock.js.map

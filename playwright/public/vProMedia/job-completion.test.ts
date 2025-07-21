@@ -9,7 +9,7 @@ test("Verify job completion hover feature for a new Radio commercial ad type spo
     'input[name="username"]',
     "imail-test+DemoProdDirector@vcreativeinc.com",
   );
-  await page.fill('input[name="password"]', "OneVCTeam2023!");
+  await page.fill('input[name="password"]', "TeamVC#Rocks2025");
   await page.click('button[type="submit"]');
   await page.waitForNavigation();
 

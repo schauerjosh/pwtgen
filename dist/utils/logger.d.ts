@@ -1,7 +1,7 @@
 export declare const logger: {
-    info: (...args: any[]) => void;
-    warn: (...args: any[]) => void;
-    error: (...args: any[]) => void;
-    success: (...args: any[]) => void;
+    info: (...args: unknown[]) => void;
+    warn: (...args: unknown[]) => void;
+    error: (...args: unknown[]) => void;
+    success: (...args: unknown[]) => void;
 };
 //# sourceMappingURL=logger.d.ts.map

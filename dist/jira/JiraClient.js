@@ -63,7 +63,7 @@ export class JiraClient {
         if (typeof content === 'string') {
             return content;
         }
-        if (content?.content) {
+        if (typeof content === 'object' && content && content['content']) {
             return this.extractTextFromADF(content.content);
         }
         return '';
@@ -71,17 +71,20 @@ export class JiraClient {
     extractTextFromADF(content) {
         let text = '';
         for (const node of content) {
-            if (node.type === 'text') {
-                text += node.text;
-            }
-            else if (node.type === 'paragraph' && node.content) {
-                text += this.extractTextFromADF(node.content) + '\n';
-            }
-            else if (node.type === 'listItem' && node.content) {
-                text += '• ' + this.extractTextFromADF(node.content) + '\n';
-            }
-            else if (node.content) {
-                text += this.extractTextFromADF(node.content);
+            if (typeof node === 'object' && node !== null) {
+                const n = node;
+                if (n['type'] === 'text' && typeof n['text'] === 'string') {
+                    text += n['text'];
+                }
+                else if (n['type'] === 'paragraph' && Array.isArray(n['content'])) {
+                    text += this.extractTextFromADF(n['content']) + '\n';
+                }
+                else if (n['type'] === 'listItem' && Array.isArray(n['content'])) {
+                    text += '\u2022 ' + this.extractTextFromADF(n['content']) + '\n';
+                }
+                else if (Array.isArray(n['content'])) {
+                    text += this.extractTextFromADF(n['content']);
+                }
             }
         }
         return text.trim();

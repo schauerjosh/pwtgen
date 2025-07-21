@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { TestConfig } from '../types/index';
+import type { TestConfig } from '../types/index.js';
 
 const TestConfigSchema = z.object({
   ticket: z.object({

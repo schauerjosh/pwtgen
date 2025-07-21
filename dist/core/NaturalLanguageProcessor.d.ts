@@ -1,4 +1,4 @@
-import { TicketTestRequest, DeveloperInterventionStep, NaturalLanguageTestResult } from "../types/enhanced-index";
+import { TicketTestRequest, DeveloperInterventionStep, NaturalLanguageTestResult } from "../types/enhanced-index.js";
 export declare class NaturalLanguageProcessor {
     processTicketRequest(request: TicketTestRequest & {
         description: string;

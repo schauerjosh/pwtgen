@@ -93,6 +93,60 @@ See `knowledge-base/workflows/authentication.md` for a standard login flow and c
 - See `docs/environment.md` for environment variable help
 - For issues, open a GitHub issue or consult the documentation
 
+## Troubleshooting: npm link/unlink and E404 Issues
+
+If you encounter errors such as:
+
+```
+npm ERR! code E404
+npm ERR! 404 Not Found - GET https://registry.npmjs.org/pwtgen - Not found
+npm ERR! 404  'pwtgen@*' is not in this registry.
+```
+
+### Common Causes
+- The package name in your `package.json` does not match the name you are linking.
+- You did not run `npm link` in the source project directory first.
+- You are running `npm install pwtgen` instead of `npm link pwtgen` in the target project.
+
+### How to Fix
+1. **Check your package name:**
+   - Open your `package.json` and verify the `"name"` field (e.g., `"pwtgen"`).
+   - Use this exact name in all `npm link` commands.
+
+2. **Link the package globally from the source project:**
+   ```bash
+   npm unlink
+   npm link
+   ```
+
+3. **Link the package in your target project:**
+   ```bash
+   npm unlink pwtgen
+   npm link pwtgen
+   ```
+
+4. **If you still get E404 or issues:**
+   - Try clearing npm’s cache and reinstalling dependencies:
+     ```bash
+     npm cache clean --force
+     rm -rf node_modules package-lock.json
+     npm install
+     ```
+   - **Direct path link workaround:**
+     In your target project, run:
+     ```bash
+     npm link /Users/joshschauer/Documents/projects/playwright-test-generator
+     ```
+     This links the local package by path, bypassing the registry and global name resolution.
+
+5. **Verify the link:**
+   - Run `npm ls -g --depth=0` to check if `pwtgen` is globally linked.
+   - Run `which pwtgen` to ensure the CLI is available in your PATH.
+
+6. **Do not use `npm install pwtgen`** (this tries to fetch from the npm registry and will always fail for local packages).
+
+For more details, see the npm debug log referenced in the error message.
+
 ## Dev Intervention & Self-Healing (Phase 2+)
 
 If a generated Playwright test fails during execution:

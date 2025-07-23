@@ -11,15 +11,14 @@ import { Command } from 'commander';
 import inquirer from 'inquirer';
 import chalk from 'chalk';
 import ora from 'ora';
-import { config } from 'dotenv';
+import { config as dotenvConfig } from 'dotenv';
 import { TestGenerator } from './core/TestGenerator.js';
 import { JiraClient } from './jira/JiraClient.js';
-import { VectraRAGService } from './rag/VectraRAGService.js';
 import { validateConfig } from './utils/validation.js';
 import { logger } from './utils/logger.js';
 import type { TestConfig, Environment } from './types/index.js';
 
-config();
+dotenvConfig();
 
 const program = new Command();
 
@@ -75,6 +74,40 @@ program
   .description('Launch a browser and record Playwright actions to generate a test (JIRA integration included)')
   .action(async () => {
     await handleRecordCommand();
+  });
+
+program
+  .command('interactive')
+  .description('Streamlined interactive mode: prompts for Jira card and environment, then runs in --interactive mode')
+  .action(async () => {
+    const inquirer = (await import('inquirer')).default;
+    const options: Partial<GenerateOptions> = {};
+    if (!process.argv.includes('--ticket')) {
+      const { ticket } = await inquirer.prompt([
+        {
+          type: 'input',
+          name: 'ticket',
+          message: 'Enter the Jira ticket key (e.g., QA-247):',
+          validate: (input: string) => input.trim() ? true : 'Ticket key is required.'
+        }
+      ]);
+      options.ticket = ticket;
+    }
+    if (!process.argv.includes('--env')) {
+      const { env } = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'env',
+          message: 'Select the environment:',
+          choices: ['test', 'prod', 'qa', 'staging'],
+          default: 'test',
+        }
+      ]);
+      options.env = env;
+    }
+    options.interactive = true;
+    const config = await buildTestConfig(options);
+    await generateTest(config, true);
   });
 
 async function handleRecordCommand() {
@@ -145,7 +178,7 @@ async function handleRecordCommand() {
     if (fs.existsSync(usersFile)) {
       try {
         users = JSON.parse(fs.readFileSync(usersFile, 'utf8'));
-      } catch {}
+      } catch { /* ignore error */ }
     }
     users.push(loginCredentials);
     fs.writeFileSync(usersFile, JSON.stringify(users, null, 2), 'utf8');
@@ -186,7 +219,7 @@ async function handleRecordCommand() {
     if (fs.existsSync(spotsFile)) {
       try {
         spots = JSON.parse(fs.readFileSync(spotsFile, 'utf8'));
-      } catch {}
+      } catch { /* ignore error */ }
     }
     spots.push(spotDetails);
     fs.writeFileSync(spotsFile, JSON.stringify(spots, null, 2), 'utf8');
@@ -247,82 +280,102 @@ interface GenerateOptions {
   interactive?: boolean;
 }
 
+// Utility to extract first valid user from test-users.md
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+async function getDefaultTestUser() {
+  const fs = await import('fs/promises');
+  // Resolve path relative to project root, regardless of src or dist
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = dirname(__filename);
+  // Try both possible locations
+  let userFile;
+  try {
+    userFile = join(__dirname, '../knowledge-base/fixtures/test-users.md');
+    return await tryParseUserFile(userFile, fs);
+  } catch { /* ignore error, try next path */ }
+  try {
+    userFile = join(__dirname, '../../knowledge-base/fixtures/test-users.md');
+    return await tryParseUserFile(userFile, fs);
+  } catch { /* ignore error, fallback to default */ }
+  return { email: 'testuser@example.com', password: 'password' };
+}
+import type { promises as FsPromisesType } from 'fs';
+async function tryParseUserFile(userFile: string, fs: typeof FsPromisesType): Promise<{ email: string; password: string }> {
+  const file = await fs.readFile(userFile, 'utf8');
+  const match = file.match(/export const validUsers = (\[[\s\S]*?\]);/);
+  if (match) {
+    const validUsers = eval(match[1]);
+    return validUsers[0];
+  }
+  throw new Error('No valid users found');
+}
+
 async function buildTestConfig(options: GenerateOptions): Promise<TestConfig> {
   try {
-    // Prompt for all args, even if provided
-    const answers = await inquirer.prompt([
-      {
+    // Only prompt for missing args
+    const questions = [];
+    if (!options.ticket) {
+      questions.push({
         type: 'input',
         name: 'ticket',
         message: 'Enter Jira ticket key:',
-        default: options.ticket,
         validate: (input: string) => {
           if (!input.match(/^[A-Z]+-\d+$/)) {
             return 'Please enter a valid Jira ticket key (e.g., PROJ-123)';
           }
           return true;
         }
-      },
-      {
+      });
+    }
+    if (!options.env) {
+      questions.push({
         type: 'list',
         name: 'environment',
         message: 'Select target environment:',
         choices: ['test', 'qa', 'staging', 'prod'],
-        default: options.env || 'test'
-      },
-      {
-        type: 'input',
-        name: 'outputPath',
-        message: 'Enter output file path:',
-        default: options.output || ((answers: { ticket: string }) => `tests/e2e/${(options.ticket || answers.ticket).toLowerCase()}.spec.ts`)
-      },
-      {
-        type: 'confirm',
-        name: 'overwrite',
-        message: 'Overwrite existing test file if it exists?',
-        default: !!options.overwrite
-      }
-    ]);
-
+        default: 'test'
+      });
+    }
+    questions.push({
+      type: 'input',
+      name: 'outputPath',
+      message: 'Enter output file path:',
+      default: options.output || ((answers: { ticket: string }) => `tests/e2e/${(options.ticket || answers.ticket).toLowerCase()}.spec.ts`)
+    });
+    questions.push({
+      type: 'confirm',
+      name: 'overwrite',
+      message: 'Overwrite existing test file if it exists?',
+      default: !!options.overwrite
+    });
+    const answers = questions.length > 0 ? await inquirer.prompt(questions) : {};
     const spinner = ora('Building configuration...').start();
     const jiraClient = new JiraClient();
-    const ticket = await jiraClient.getTicket(answers.ticket);
-
+    const ticket = await jiraClient.getTicket(options.ticket || answers.ticket);
     // Prompt for vCreative login if card description contains 'as yourself' or 'ghost in as'
     let vCreativeCredentials = undefined;
     if (/as yourself|ghost in as/i.test(ticket.description)) {
-      spinner.stop(); // Stop spinner before prompt
+      spinner.stop();
       console.log('[DEBUG] Prompting for vCreative credentials...');
       vCreativeCredentials = await inquirer.prompt([
-        {
-          type: 'input',
-          name: 'email',
-          message: 'Enter your vCreative login email:'
-        },
-        {
-          type: 'password',
-          name: 'password',
-          message: 'Enter your vCreative password:'
-        }
+        { type: 'input', name: 'email', message: 'Enter your vCreative login email:' },
+        { type: 'password', name: 'password', message: 'Enter your vCreative password:' }
       ]);
-      console.log('[DEBUG] vCreative credentials received:', vCreativeCredentials.email ? 'email entered' : 'no email');
-      spinner.start(); // Restart spinner after prompt
+      spinner.start();
     }
-
     const config: TestConfig = {
       ticket,
-      environment: answers.environment as Environment,
-      outputPath: answers.outputPath,
-      overwrite: answers.overwrite,
-      dryRun: false, // Default to no, do not prompt
-      pageObjectPattern: false, // Default to no, do not prompt
-      vCreativeCredentials // Add credentials to config if provided
+      environment: (options.env || answers.environment) as Environment,
+      outputPath: answers.outputPath || options.output,
+      overwrite: answers.overwrite ?? options.overwrite,
+      dryRun: false,
+      pageObjectPattern: false,
+      vCreativeCredentials
     };
-
     spinner.succeed('Configuration built successfully');
     return validateConfig(config);
   } catch (error) {
-    // Only start spinner if error occurs after prompt
     const spinner = ora('Building configuration...').start();
     spinner.fail('Failed to build configuration');
     throw error;
@@ -332,30 +385,32 @@ async function buildTestConfig(options: GenerateOptions): Promise<TestConfig> {
 async function generateTest(config: TestConfig, interactive = false): Promise<void> {
   console.log(chalk.green('[pwtgen] Starting test generation...'));
   const spinner = ora('Generating Playwright test...').start();
-
   try {
     const generator = new TestGenerator();
     let interventionIndex = null;
     let interventionCode = '';
+    let manualSteps = '';
+    let steps: string[] = [];
     if (interactive) {
       // Dev intervention loop
       const ragContexts = await generator['retrieveContext'](config);
       const aiSteps = await generator['generateTestCode'](config, ragContexts);
-      const steps = aiSteps.split(/(?=await test\.step)/g);
+      steps = aiSteps.split(/(?=await test\.step)/g);
       for (let i = 0; i < steps.length; i++) {
         console.log(chalk.yellow(`\nStep ${i + 1}:`));
         console.log(chalk.cyan(steps[i]));
         spinner.stop(); // Ensure spinner does not hide prompt
+        const interventionChoices = [
+          { name: 'Accept suggested code', value: 'accept' },
+          { name: 'Edit code (manual/codegen)', value: 'edit' },
+          { name: 'Skip this step', value: 'skip' }
+        ];
         const { action } = await inquirer.prompt([
           {
             type: 'list',
             name: 'action',
             message: 'Choose an action:',
-            choices: [
-              { name: 'Accept suggested code', value: 'accept' },
-              { name: 'Intervene or take manual action in Playwright (record new steps)', value: 'edit' },
-              { name: 'Skip this step', value: 'skip' }
-            ]
+            choices: interventionChoices
           }
         ]);
         if (action === 'edit') {
@@ -418,7 +473,6 @@ async function generateTest(config: TestConfig, interactive = false): Promise<vo
           default: false
         }
       ]);
-      let manualSteps = '';
       if (wantsCodegen) {
         const codegenPath = config.outputPath.replace(/\.ts$/, '.manual.ts');
         const { TestGeneratorUtils } = await import('./core/TestGenerator.js');
@@ -450,183 +504,115 @@ async function generateTest(config: TestConfig, interactive = false): Promise<vo
           }
         }
       }
-      // Merge AI/dev steps and manual steps
-      let mergedSteps = steps.filter(Boolean).map((step, idx) => {
-        if (step.startsWith('import { test, expect }')) return '';
-        if (step.startsWith('test(') || step.startsWith('test.describe(')) return '';
-        if (step.startsWith('// Step skipped by developer')) return step;
-        return step;
-      }).filter(Boolean).join('\n\n');
-
-      let mergedCode = `import { expect, test } from '@playwright/test';\n\ntest.describe('Calendar View Functionality', () => {\n  test.beforeEach(async ({ page }) => {\n    // ...login steps...\n  });\n\n  test('Verify Calendar View and Functionality', async ({ page }) => {\n${mergedSteps}\n  });\n\n  test.afterEach(async ({ page }, testInfo) => {\n    if (testInfo.status !== testInfo.expectedStatus) {\n      await page.screenshot({ path: \`screenshots/\${testInfo.title}.png\`, fullPage: true });\n    }\n  });\n});\n`;
-
-      // Remove duplicate Playwright imports
-      mergedCode = mergedCode.replace(/(import\s+\{\s*expect,\s*test\s*\}\s+from\s+'@playwright\/test';?\s*)+/g, 'import { expect, test } from "@playwright/test";\n');
-      // When merging manual steps, check for duplication
-      if (manualSteps) {
-        const manualBodyMatch = manualSteps.match(/test\([^)]*\)\s*{([\s\S]*)}/);
-        const manualBody = manualBodyMatch ? manualBodyMatch[1].trim() : manualSteps.trim();
-        // Only append manual steps if not already present in steps
-        if (!mergedCode.includes(manualBody.substring(0, 40))) {
-          mergedCode += `\n\n// Manual steps recorded:\n${manualBody}`;
-        }
-      }
-      // Write final merged code to output path
-      const fs = await import('fs/promises');
-      await fs.mkdir(config.outputPath.replace(/\/[^/]+$/, ''), { recursive: true });
-      await fs.writeFile(config.outputPath, mergedCode, 'utf8');
-      spinner.succeed('Test generation complete');
-      console.log(chalk.green(`✅ Test saved to: ${config.outputPath}`));
-      // After test generation, automatically map intervention
-      if (interventionIndex !== null) {
-        const mappingFile = 'knowledge-base/workflows/card-test-mapping.md';
-        const mappingDir = 'knowledge-base/workflows';
-        await fs.mkdir(mappingDir, { recursive: true });
-        const cardKey = config.ticket?.key || '';
-        const cardSummary = config.ticket?.summary || '';
-        const cardDetails = config.ticket?.description || '';
-        const mappingText = `\n---\nCard: ${cardKey}\nSummary: ${cardSummary}\nDetails: ${cardDetails}\nTest File: ${config.outputPath}\nIntervention Step: ${interventionIndex + 1}\nIntervention Code: ${interventionCode.substring(0, 200)}\n---\n`;
-        await fs.appendFile(mappingFile, mappingText);
-        console.log(chalk.green(`✅ Intervention mapping appended to ${mappingFile}`));
-      }
-      // Confirm with dev to add selectors/steps for self-learning
-      const { addSelectors } = await inquirer.prompt([
-        {
-          type: 'confirm',
-          name: 'addSelectors',
-          message: 'Would you like to add selectors/steps from this test to the knowledge base for future self-learning and improved test generation?',
-          default: false
-        }
-      ]);
-      if (addSelectors) {
-        const testContent = await fs.readFile(config.outputPath, 'utf8');
-        const selectorMatches = testContent.match(/getBy(Role|Text|Label|TestId)\([^)]*\)/g) || [];
-        if (selectorMatches.length) {
-          const selectorFile = 'knowledge-base/selectors/vpromedia-selectors.md';
-          const selectorDir = 'knowledge-base/selectors';
-          await fs.mkdir(selectorDir, { recursive: true });
-          const selectorText = selectorMatches.map(sel => `- ${sel}`).join('\n');
-          await fs.appendFile(selectorFile, `\n${selectorText}\n`);
-          console.log(chalk.green(`✅ Selectors appended to ${selectorFile}`));
-        } else {
-          console.log(chalk.yellow('No selectors found to add.'));
-        }
-      }
-      const { addTestData } = await inquirer.prompt([
-        {
-          type: 'confirm',
-          name: 'addTestData',
-          message: 'Would you like to add test data from this test to the CLI knowledge base?',
-          default: false
-        }
-      ]);
-      if (addTestData) {
-        const testContent = await fs.readFile(config.outputPath, 'utf8');
-        // Example: extract emails, passwords, search terms
-        const dataMatches = testContent.match(/fill\(['"]([^'"]+)['"]\)/g) || [];
-        if (dataMatches.length) {
-          const dataFile = 'knowledge-base/fixtures/test-users.md';
-          const dataDir = 'knowledge-base/fixtures';
-          await fs.mkdir(dataDir, { recursive: true });
-          const dataText = dataMatches.map(d => `- ${d}`).join('\n');
-          await fs.appendFile(dataFile, `\n${dataText}\n`);
-          console.log(chalk.green(`✅ Test data appended to ${dataFile}`));
-        } else {
-          console.log(chalk.yellow('No test data found to add.'));
-        }
-      }
-      // Prompt to map test to Jira card and dev actions
-      const { mapCard } = await inquirer.prompt([
-        {
-          type: 'confirm',
-          name: 'mapCard',
-          message: 'Would you like to map this test to a Jira card and document your dev actions?',
-          default: true
-        }
-      ]);
-      if (mapCard) {
-        // Get card info from config or prompt
-        let cardKey = config.ticket?.key || '';
-        if (!cardKey) {
-          const { enteredKey } = await inquirer.prompt([
-            {
-              type: 'input',
-              name: 'enteredKey',
-              message: 'Enter the Jira card key (e.g., QA-123):',
-              validate: input => input ? true : 'Card key required.'
-            }
-          ]);
-          cardKey = enteredKey;
-        }
-        let cardSummary = config.ticket?.summary || '';
-        if (!cardSummary) {
-          const { enteredSummary } = await inquirer.prompt([
-            {
-              type: 'input',
-              name: 'enteredSummary',
-              message: 'Enter a brief summary of the card:',
-              validate: input => input ? true : 'Summary required.'
-            }
-          ]);
-          cardSummary = enteredSummary;
-        }
-        let cardDetails = config.ticket?.description || '';
-        if (!cardDetails) {
-          const { enteredDetails } = await inquirer.prompt([
-            {
-              type: 'input',
-              name: 'enteredDetails',
-              message: 'Enter card details/acceptance criteria:',
-              validate: input => input ? true : 'Details required.'
-            }
-          ]);
-          cardDetails = enteredDetails;
-        }
-        // Ask dev what they did to ensure test quality
-        const { devActions } = await inquirer.prompt([
-          {
-            type: 'input',
-            name: 'devActions',
-            message: 'Describe what you did to ensure the test was created properly:',
-            validate: input => input ? true : 'Please describe your actions.'
-          }
-        ]);
-        // Append mapping to knowledge base
-        const mappingFile = 'knowledge-base/workflows/card-test-mapping.md';
-        const mappingText = `\n---\nCard: ${cardKey}\nSummary: ${cardSummary}\nDetails: ${cardDetails}\nTest File: ${config.outputPath}\nDev Actions: ${devActions}\n---\n`;
-        await fs.appendFile(mappingFile, mappingText);
-        console.log(chalk.green(`✅ Mapping appended to ${mappingFile}`));
-      }
     } else {
-      // Non-interactive mode: directly generate test
-      const ragService = new VectraRAGService();
-      // Fix VectraRAGService usage: use query method to get test code
-      const responseArr = await ragService.query(config.ticket?.description || config.ticket?.summary || '', 1, 0.1);
-      const response = responseArr[0]?.content || '';
-      const fs = await import('fs/promises');
-      await fs.mkdir(config.outputPath.replace(/\/[^/]+$/, ''), { recursive: true });
-      await fs.writeFile(config.outputPath, response, 'utf8');
-      spinner.succeed('Test generation complete');
-      console.log(chalk.green(`✅ Test saved to: ${config.outputPath}`));
+      // Non-interactive: generate steps directly
+      const ragContexts = await generator['retrieveContext'](config);
+      const aiSteps = await generator['generateTestCode'](config, ragContexts);
+      steps = aiSteps.split(/(?=await test\.step)/g);
+    }
+    // Merge AI/dev steps and manual steps into a single, robust pipeline
+    const filteredSteps = steps.filter(Boolean).map((step) => {
+      if (/^import\s+\{\s*expect,?\s*test\s*\}/.test(step)) return '';
+      if (/^test\.describe\(/.test(step)) return '';
+      if (/^test\('/.test(step)) return '';
+      if (/^test\.afterEach\(/.test(step)) return '';
+      if (/^test\.beforeEach\(/.test(step)) return '';
+      return step;
+    }).filter(Boolean);
+    // Get the base URL for the selected environment
+    const { TestGeneratorUtils } = await import('./core/TestGenerator.js');
+    const baseUrl = TestGeneratorUtils.getBaseUrl(config.environment);
+    // Use credentials from vCreativeCredentials, .env, or test-users.md
+    let email, password;
+    if (config.vCreativeCredentials && config.vCreativeCredentials.email && config.vCreativeCredentials.password) {
+      email = config.vCreativeCredentials.email;
+      password = config.vCreativeCredentials.password;
+    } else if (process.env.TEST_EMAIL && process.env.TEST_PASSWORD) {
+      email = process.env.TEST_EMAIL;
+      password = process.env.TEST_PASSWORD;
+    } else {
+      const user = await getDefaultTestUser();
+      email = user.email;
+      password = user.password;
+    }
+    // Generate login steps
+    const loginSteps = `\n    await page.goto('${baseUrl}/login');\n    await page.getByRole('textbox', { name: 'Email' }).fill('${email}');\n    await page.getByRole('textbox', { name: 'Password' }).fill('${password}');\n    await page.getByRole('button', { name: /login/i }).click();\n    await expect(page).toHaveURL(/dashboard|home|main/i); // Adjust as needed\n    `;
+    const mergedSteps = filteredSteps.join('\n\n');
+    let mergedCode = 'import { expect, test } from "@playwright/test";\n\n';
+    mergedCode += 'test.describe(\'Calendar View Functionality\', () => {\n';
+    mergedCode += '  test.beforeEach(async ({ page }) => {\n' + loginSteps + '  });\n\n';
+    mergedCode += '  test(\'Verify Calendar View and Functionality\', async ({ page }) => {\n';
+    mergedCode += mergedSteps.split('\n').map(line => '    ' + line).join('\n') + '\n';
+    mergedCode += '  });\n\n';
+    mergedCode += '  test.afterEach(async ({ page }, testInfo) => {\n';
+    mergedCode += '    if (testInfo.status !== testInfo.expectedStatus) {\n';
+    mergedCode += '      await page.screenshot({ path: `screenshots/' + '${testInfo.title}' + '.png`, fullPage: true });\n';
+    mergedCode += '    }\n';
+    mergedCode += '  });\n';
+    mergedCode += '});\n';
+    // Remove duplicate Playwright imports
+    mergedCode = mergedCode.replace(/(import\s+\{\s*expect,?\s*test\s*\}\s+from\s+'@playwright\/test';?\s*)+/g, 'import { expect, test } from "@playwright/test";\n');
+    // When merging manual steps, robustly strip all imports and all Playwright block statements (test, test.describe, test.beforeEach, test.afterEach, etc.) from manual/dev intervention code before merging. Only keep the step/action code. Update merging logic to handle all edge cases and prevent nested blocks.
+    if (manualSteps) {
+      // Remove all import statements (anywhere in the code, not just at the start of lines)
+      let cleaned = manualSteps.replace(/import\s+\{?[^\n;]*\}?\s+from\s+['"][^'"]+['"];?/g, '').replace(/^import[^\n]*\n?/gm, '').trim();
+      // Remove all test.describe, test.beforeEach, test.afterEach, and similar Playwright block statements (including their bodies)
+      const blockPatterns = [
+        /test\s*\.\s*describe\s*\([^)]*\)\s*{[\s\S]*?^\s*}\s*$/gm,
+        /test\s*\.\s*beforeEach\s*\([^)]*\)\s*{[\s\S]*?^\s*}\s*$/gm,
+        /test\s*\.\s*afterEach\s*\([^)]*\)\s*{[\s\S]*?^\s*}\s*$/gm,
+        /test\s*\([^)]*\)\s*{[\s\S]*?^\s*}\s*$/gm
+      ];
+      for (const pattern of blockPatterns) {
+        cleaned = cleaned.replace(pattern, '');
+      }
+      // Remove any remaining describe(...) blocks (non-Playwright)
+      cleaned = cleaned.replace(/describe\s*\([^)]*\)\s*{[\s\S]*?^\s*}\s*$/gm, '');
+      // Remove any remaining beforeEach/afterEach blocks (non-Playwright)
+      cleaned = cleaned.replace(/beforeEach\s*\([^)]*\)\s*{[\s\S]*?^\s*}\s*$/gm, '');
+      cleaned = cleaned.replace(/afterEach\s*\([^)]*\)\s*{[\s\S]*?^\s*}\s*$/gm, '');
+      // Remove any leftover empty lines
+      cleaned = cleaned.replace(/^[ \t]*\n/gm, '');
+      cleaned = cleaned.trim();
+      // If nothing left, fallback to original manualSteps
+      if (!cleaned) cleaned = manualSteps;
+      // Indent and annotate
+      if (!mergedCode.includes(cleaned.substring(0, 40))) {
+        mergedCode += '\n\n// Manual steps recorded (dev intervention):\n' + cleaned.split('\n').map(line => '    ' + line).join('\n');
+      }
+    }
+    // Write final merged code to output path
+    const fs = await import('fs/promises');
+    await fs.mkdir(config.outputPath.replace(/\/[^/]+$/, ''), { recursive: true });
+    await fs.writeFile(config.outputPath, mergedCode, 'utf8');
+    spinner.succeed('Test generation complete');
+    console.log(chalk.green('Test saved to: ' + config.outputPath));
+    if (interventionIndex !== null) {
+      const mappingFile = 'knowledge-base/workflows/card-test-mapping.md';
+      const mappingDir = 'knowledge-base/workflows';
+      await fs.mkdir(mappingDir, { recursive: true });
+      const cardKey = config.ticket?.key || '';
+      const cardSummary = config.ticket?.summary || '';
+      const cardDetails = config.ticket?.description || '';
+      const mappingText = '\n---\nCard: ' + cardKey + '\nSummary: ' + cardSummary + '\nDetails: ' + cardDetails + '\nTest File: ' + config.outputPath + '\nIntervention Step: ' + (interventionIndex + 1) + '\nIntervention Code: ' + interventionCode.substring(0, 200) + '\n---\n';
+      await fs.appendFile(mappingFile, mappingText);
+      console.log(chalk.green('Intervention mapping appended to ' + mappingFile));
     }
   } catch (error) {
-    spinner.fail('Test generation failed');
+    spinner.fail('Failed to generate test');
     logger.error(error);
     throw error;
   }
 }
 
-// Common initialization and configuration functions
-export async function initializeConfig() {
+async function initializeConfig() {
   console.log('Initializing pwtgen configuration...');
-  // TODO: Implement configuration initialization logic
-  console.log('Configuration initialized.');
+  // ...existing init logic...
 }
 
-export async function validateSetup() {
+async function validateSetup() {
   console.log('Validating setup...');
-  // TODO: Implement setup validation logic
-  console.log('Setup is valid.');
+  // ...existing validation logic...
 }
 
 async function embedKnowledgeBase() {

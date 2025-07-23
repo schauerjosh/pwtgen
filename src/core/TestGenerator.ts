@@ -190,7 +190,27 @@ Generate a complete Playwright test that:
   }
 
   private async writeTestFile(outputPath: string, content: string, overwrite: boolean): Promise<string> {
+    const { stat } = await import('fs/promises');
     await mkdir(dirname(outputPath), { recursive: true });
+
+    // Check if outputPath is a directory
+    try {
+      const stats = await stat(outputPath);
+      if (stats.isDirectory()) {
+        // Optionally, delete the directory or throw a clear error
+        throw new Error(`${outputPath} is a directory, not a file. Please remove or rename the directory.`);
+      }
+    } catch (e) {
+      if (
+        typeof e === 'object' &&
+        e !== null &&
+        'code' in e &&
+        (e as { code?: string }).code !== 'ENOENT'
+      ) {
+        throw e;
+      }
+      // ENOENT is fine (file doesn't exist yet)
+    }
 
     let finalPath = outputPath;
     if (!overwrite) {

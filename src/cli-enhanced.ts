@@ -92,11 +92,11 @@ program
         if (step.stepIndex === 0 && ENV_URLS[env]) {
           promptEnvUrl = ENV_URLS[env];
         }
-        console.log(chalk.yellow(`\n🔄 Step ${step.stepIndex + 1}: ${step.description}`));
+        logInfo(chalk.yellow(`\n🔄 Step ${step.stepIndex + 1}: ${step.description}`));
         if (promptEnvUrl) {
-          console.log(chalk.magenta(`🌐 Environment URL: ${promptEnvUrl}`));
+          logInfo(chalk.magenta(`🌐 Environment URL: ${promptEnvUrl}`));
         }
-        console.log(chalk.cyan(`💡 Suggested code:\n${step.suggestedCode}`));
+        logInfo(chalk.cyan(`💡 Suggested code:\n${step.suggestedCode}`));
         const { action } = await inquirer.prompt([
           {
             type: 'list',
@@ -124,7 +124,7 @@ program
         } else if (action === 'skip') {
           return '// Step skipped by developer';
         } else if (action === 'debug') {
-          console.log(chalk.magenta('🐛 Debug mode - test generation paused. Do your manual investigation now.'));
+          logInfo(chalk.magenta('🐛 Debug mode - test generation paused. Do your manual investigation now.'));
           await inquirer.prompt([{ type: 'input', name: 'continue', message: 'Press ENTER to continue...' }]);
           return step.suggestedCode;
         }
@@ -145,14 +145,14 @@ program
       }
       fs.writeFileSync(output, result.code, 'utf-8');
 
-      console.log(chalk.green(`\n✅ Test generated: ${output}`));
-      console.log(chalk.blue(`📋 Ticket: ${ticket}`));
-      console.log(chalk.blue(`🎯 Environment: ${env} (${ENV_URLS[env]})`));
-      console.log(chalk.blue(`📁 Output: ${output}`));
-      console.log(chalk.blue(`🧪 Test name: ${result.testName}`));
-      console.log(chalk.blue(`📊 Steps: ${result.steps.length}`));
+      logInfo(chalk.green(`\n✅ Test generated: ${output}`));
+      logInfo(chalk.blue(`📋 Ticket: ${ticket}`));
+      logInfo(chalk.blue(`🎯 Environment: ${env} (${ENV_URLS[env]})`));
+      logInfo(chalk.blue(`📁 Output: ${output}`));
+      logInfo(chalk.blue(`🧪 Test name: ${result.testName}`));
+      logInfo(chalk.blue(`📊 Steps: ${result.steps.length}`));
       result.steps.forEach((step, i) => {
-        console.log(chalk.gray(`   ${i + 1}. ${step}`));
+        logInfo(chalk.gray(`   ${i + 1}. ${step}`));
       });
     } catch (error) {
       spinner.fail('Failed to generate test');
@@ -172,7 +172,19 @@ program
     }
     const sh = new SelfHealingService();
     const result = await sh.healTestFile(options.file);
-    console.log(chalk.green('🔧 Self-healing result:'), result);
+    logInfo(chalk.green('🔧 Self-healing result:') + ' ' + JSON.stringify(result));
   });
 
-program.parse();
+program
+  .option('--debug', 'Enable debug/info logging', false);
+
+program.parseAsync(process.argv).then(() => {
+  debugMode = program.opts().debug;
+});
+
+let debugMode = false;
+function logInfo(message: string) {
+  if (debugMode) {
+    console.log(chalk.blue('[INFO]'), message);
+  }
+}

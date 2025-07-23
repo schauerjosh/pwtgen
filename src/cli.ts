@@ -27,6 +27,13 @@ program
   .description('AI-Powered Playwright Test Generator CLI')
   .version('2.0.0');
 
+let debugMode = false;
+function logInfo(message: string) {
+  if (debugMode) {
+    console.log(chalk.blue('[INFO]'), message);
+  }
+}
+
 program
   .command('generate')
   .alias('gen')
@@ -111,14 +118,14 @@ program
   });
 
 async function handleRecordCommand() {
-  console.log('\nINSTRUCTIONS:');
-  console.log('1. You will select the environment and specify the file location for your Playwright test.');
-  console.log('2. A browser window will open to the selected environment URL.');
-  console.log('3. Perform your test actions in the browser.');
-  console.log('4. When you are done, CLOSE the browser window.');
-  console.log('5. Your actions will be automatically captured and saved as a Playwright test in the file you specify.');
-  console.log('6. To run your new test, use: npx playwright test <path-to-your-test-file>');
-  console.log('');
+  logInfo('INSTRUCTIONS:');
+  logInfo('1. You will select the environment and specify the file location for your Playwright test.');
+  logInfo('2. A browser window will open to the selected environment URL.');
+  logInfo('3. Perform your test actions in the browser.');
+  logInfo('4. When you are done, CLOSE the browser window.');
+  logInfo('5. Your actions will be automatically captured and saved as a Playwright test in the file you specify.');
+  logInfo('6. To run your new test, use: npx playwright test <path-to-your-test-file>');
+  logInfo('');
 
   // Load environment URLs from .env or knowledge base
   const ENV_URLS = {
@@ -182,7 +189,7 @@ async function handleRecordCommand() {
     }
     users.push(loginCredentials);
     fs.writeFileSync(usersFile, JSON.stringify(users, null, 2), 'utf8');
-    console.log(`\n✅ Credentials saved to ${usersFile}`);
+    logInfo(`\n✅ Credentials saved to ${usersFile}`);
   }
 
   // Prompt for spot data or mock files (integrate with KB if available)
@@ -223,9 +230,9 @@ async function handleRecordCommand() {
     }
     spots.push(spotDetails);
     fs.writeFileSync(spotsFile, JSON.stringify(spots, null, 2), 'utf8');
-    console.log(`\n✅ Spot data saved to ${spotsFile}`);
+    logInfo(`\n✅ Spot data saved to ${spotsFile}`);
   } else if (wantsSpotData === 'mock') {
-    console.log('\nUsing mock spot data files.');
+    logInfo('\nUsing mock spot data files.');
     // Optionally copy or reference mock files here
   }
 
@@ -244,9 +251,9 @@ async function handleRecordCommand() {
   // Launch Playwright in record mode
   const { execSync } = await import('child_process');
   try {
-    console.log(`\nLaunching Playwright in record mode for: ${url}\n`);
+    logInfo(`\nLaunching Playwright in record mode for: ${url}\n`);
     execSync(`npx playwright codegen ${url} --output ${absPath}`, { stdio: 'inherit' });
-    console.log(`\n✅ Test actions recorded and saved to ${absPath}`);
+    logInfo(`\n✅ Test actions recorded and saved to ${absPath}`);
   } catch (err) {
     console.error('Error:', err);
   }
@@ -262,7 +269,7 @@ async function handleRecordCommand() {
   ]);
   if (runTest) {
     try {
-      console.log(`\nRunning: TEST_ENV=${envKey} PWDEBUG=1 npx playwright test ${absPath}\n`);
+      logInfo(`\nRunning: TEST_ENV=${envKey} PWDEBUG=1 npx playwright test ${absPath}\n`);
       execSync(`TEST_ENV=${envKey} PWDEBUG=1 npx playwright test ${absPath}`, { stdio: 'inherit' });
     } catch (err) {
       console.error('Error:', err);
@@ -340,8 +347,9 @@ async function buildTestConfig(options: GenerateOptions): Promise<TestConfig> {
     questions.push({
       type: 'input',
       name: 'outputPath',
-      message: 'Enter output file path:',
-      default: options.output || ((answers: { ticket: string }) => `tests/e2e/${(options.ticket || answers.ticket).toLowerCase()}.spec.ts`)
+      message: 'Enter output file path (e.g. playwright/public/test-1):',
+      default: options.output || ((answers: { ticket: string }) => `tests/e2e/${(options.ticket || answers.ticket).toLowerCase()}`)
+      // Remove .spec.ts from default, we'll add .test.ts below
     });
     questions.push({
       type: 'confirm',
@@ -350,28 +358,20 @@ async function buildTestConfig(options: GenerateOptions): Promise<TestConfig> {
       default: !!options.overwrite
     });
     const answers = questions.length > 0 ? await inquirer.prompt(questions) : {};
+    // Add .test.ts extension if not present
+    if (answers.outputPath && !answers.outputPath.endsWith('.test.ts')) {
+      answers.outputPath = answers.outputPath + '.test.ts';
+    }
     const spinner = ora('Building configuration...').start();
     const jiraClient = new JiraClient();
     const ticket = await jiraClient.getTicket(options.ticket || answers.ticket);
-    // Prompt for vCreative login if card description contains 'as yourself' or 'ghost in as'
-    let vCreativeCredentials = undefined;
-    if (/as yourself|ghost in as/i.test(ticket.description)) {
-      spinner.stop();
-      console.log('[DEBUG] Prompting for vCreative credentials...');
-      vCreativeCredentials = await inquirer.prompt([
-        { type: 'input', name: 'email', message: 'Enter your vCreative login email:' },
-        { type: 'password', name: 'password', message: 'Enter your vCreative password:' }
-      ]);
-      spinner.start();
-    }
     const config: TestConfig = {
       ticket,
       environment: (options.env || answers.environment) as Environment,
       outputPath: answers.outputPath || options.output,
       overwrite: answers.overwrite ?? options.overwrite,
       dryRun: false,
-      pageObjectPattern: false,
-      vCreativeCredentials
+      pageObjectPattern: false
     };
     spinner.succeed('Configuration built successfully');
     return validateConfig(config);
@@ -439,9 +439,9 @@ async function generateTest(config: TestConfig, interactive = false): Promise<vo
           const url = TestGeneratorUtils.getBaseUrl(config.environment);
           const testFilePath = config.outputPath;
           try {
-            console.log(`\nLaunching Playwright codegen for: ${url} with file: ${testFilePath}\n`);
+            logInfo(`\nLaunching Playwright codegen for: ${url} with file: ${testFilePath}\n`);
             execSync(`npx playwright codegen ${url} --output ${testFilePath}`, { stdio: 'inherit' });
-            console.log(`\n✅ Edited actions recorded and saved to ${testFilePath}`);
+            logInfo(`\n✅ Edited actions recorded and saved to ${testFilePath}`);
             const fs = await import('fs/promises');
             const updatedCode = await fs.readFile(testFilePath, 'utf8');
             // Prompt which step to replace
@@ -479,9 +479,9 @@ async function generateTest(config: TestConfig, interactive = false): Promise<vo
         const url = TestGeneratorUtils.getBaseUrl(config.environment);
         const { execSync } = await import('child_process');
         try {
-          console.log(`\nLaunching Playwright codegen for: ${url}\n`);
+          logInfo(`\nLaunching Playwright codegen for: ${url}\n`);
           execSync(`npx playwright codegen ${url} --output ${codegenPath}`, { stdio: 'inherit' });
-          console.log(`\n✅ Manual actions recorded and saved to ${codegenPath}`);
+          logInfo(`\n✅ Manual actions recorded and saved to ${codegenPath}`);
           // Read manual steps
           const fs = await import('fs/promises');
           manualSteps = await fs.readFile(codegenPath, 'utf8');
@@ -620,4 +620,21 @@ async function embedKnowledgeBase() {
   // ...existing embedding logic...
 }
 
+// Set debugMode from CLI option
+program.option('--debug', 'Enable debug/info logging', false);
+program.parseAsync(process.argv).then(() => {
+  debugMode = program.opts().debug;
+});
+
 program.parse(process.argv);
+
+// Replace info/debug console.log calls with logInfo
+// Example:
+// logInfo('Starting test generation...');
+// logInfo(`Launching Playwright in record mode for: ${url}`);
+// logInfo(`Prompting for vCreative credentials...`);
+// logInfo(`Step ${i + 1}:`);
+// logInfo(steps[i]);
+// logInfo('You are about to intervene or take manual action in Playwright (record new steps).');
+// logInfo(`Launching Playwright codegen for: ${url} with file: ${testFilePath}`);
+// logInfo(`Edited actions recorded and saved to ${testFilePath}`);

@@ -30,6 +30,24 @@ pwtgen is a modern CLI tool for generating Playwright tests from Jira tickets us
    npm link
    ```
 
+## Install via npm
+
+You can use pwtgen directly from npm:
+
+### One-time global install
+```bash
+npm install -g pwtgen
+pwtgen generate [options]
+```
+
+### Use with npx (no install required)
+```bash
+npx pwtgen generate [options]
+```
+
+- You do **not** need to clone the repo for basic usage.
+- For development or extending the CLI, clone the repo as usual.
+
 ## Environment Setup
 1. Copy `.env.example` to `.env`:
    ```bash

@@ -177,10 +177,9 @@ async function handleRecordCommand() {
     ]);
     // Save credentials as fixture
     const fs = await import('fs');
-    const path = await import('path');
-    const usersDir = path.join('playwright', 'fixtures', 'users');
+    const usersDir = 'playwright/fixtures/users';
     fs.mkdirSync(usersDir, { recursive: true });
-    const usersFile = path.join(usersDir, 'users.json');
+    const usersFile = 'playwright/fixtures/users/users.json';
     let users = [];
     if (fs.existsSync(usersFile)) {
       try {
@@ -218,10 +217,9 @@ async function handleRecordCommand() {
       { type: 'input', name: 'status', message: 'Status?' },
     ]);
     const fs = await import('fs');
-    const path = await import('path');
-    const spotsDir = path.join('playwright', 'fixtures', 'spots');
+    const spotsDir = 'playwright/fixtures/spots';
     fs.mkdirSync(spotsDir, { recursive: true });
-    const spotsFile = path.join(spotsDir, 'spots.json');
+    const spotsFile = 'playwright/fixtures/spots/spots.json';
     let spots = [];
     if (fs.existsSync(spotsFile)) {
       try {
@@ -344,13 +342,25 @@ async function buildTestConfig(options: GenerateOptions): Promise<TestConfig> {
         default: 'test'
       });
     }
-    questions.push({
-      type: 'input',
-      name: 'outputPath',
-      message: 'Enter output file path (e.g. playwright/public/test-1):',
-      default: options.output || ((answers: { ticket: string }) => `tests/e2e/${(options.ticket || answers.ticket).toLowerCase()}`)
-      // Remove .spec.ts from default, we'll add .test.ts below
-    });
+    // Get playwright location from env
+    const playwrightLocation = process.env.PLAYWRIGHT_LOCATION;
+    let outputPath;
+    if (playwrightLocation) {
+      questions.push({
+        type: 'input',
+        name: 'testName',
+        message: `Enter Playwright test name (will be saved to ${playwrightLocation}/<name>.test.ts):`,
+        validate: (input: string) => input ? true : 'Test name required.'
+      });
+    } else {
+      questions.push({
+        type: 'input',
+        name: 'outputPath',
+        message: 'Enter full output file path (e.g. playwright/public/failed-login.test.ts):',
+        validate: (input: string) => input ? true : 'Output file path required.'
+      });
+      logInfo('Warning: PLAYWRIGHT_LOCATION is not set in your .env file. Please set it for easier test file management.');
+    }
     questions.push({
       type: 'confirm',
       name: 'overwrite',
@@ -358,9 +368,14 @@ async function buildTestConfig(options: GenerateOptions): Promise<TestConfig> {
       default: !!options.overwrite
     });
     const answers = questions.length > 0 ? await inquirer.prompt(questions) : {};
+    if (playwrightLocation) {
+      outputPath = `${playwrightLocation}/${answers.testName}.test.ts`;
+    } else {
+      outputPath = answers.outputPath;
+    }
     // Add .test.ts extension if not present
-    if (answers.outputPath && !answers.outputPath.endsWith('.test.ts')) {
-      answers.outputPath = answers.outputPath + '.test.ts';
+    if (outputPath && !outputPath.endsWith('.test.ts')) {
+      outputPath = outputPath + '.test.ts';
     }
     const spinner = ora('Building configuration...').start();
     const jiraClient = new JiraClient();
@@ -368,7 +383,7 @@ async function buildTestConfig(options: GenerateOptions): Promise<TestConfig> {
     const config: TestConfig = {
       ticket,
       environment: (options.env || answers.environment) as Environment,
-      outputPath: answers.outputPath || options.output,
+      outputPath,
       overwrite: answers.overwrite ?? options.overwrite,
       dryRun: false,
       pageObjectPattern: false
@@ -583,6 +598,18 @@ async function generateTest(config: TestConfig, interactive = false): Promise<vo
     }
     // Write final merged code to output path
     const fs = await import('fs/promises');
+    // Fix for Windows EISDIR error: if outputPath is a directory, rename it to .bak_<timestamp> and proceed
+    try {
+      const stats = await fs.stat(config.outputPath);
+      if (stats.isDirectory()) {
+        const backupPath = config.outputPath + '.bak_' + Date.now();
+        await fs.rename(config.outputPath, backupPath);
+        logInfo(`Directory at ${config.outputPath} was renamed to ${backupPath} to allow file creation.`);
+      }
+    } catch (e) {
+      if (typeof e === 'object' && e !== null && 'code' in e && (e as { code?: string }).code !== 'ENOENT') throw e;
+      // ENOENT is fine (file doesn't exist yet)
+    }
     await fs.mkdir(config.outputPath.replace(/\/[^/]+$/, ''), { recursive: true });
     await fs.writeFile(config.outputPath, mergedCode, 'utf8');
     spinner.succeed('Test generation complete');

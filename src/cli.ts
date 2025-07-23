@@ -318,7 +318,6 @@ async function tryParseUserFile(userFile: string, fs: typeof FsPromisesType): Pr
 
 async function buildTestConfig(options: GenerateOptions): Promise<TestConfig> {
   try {
-    // Only prompt for missing args
     const questions = [];
     if (!options.ticket) {
       questions.push({
@@ -342,11 +341,47 @@ async function buildTestConfig(options: GenerateOptions): Promise<TestConfig> {
         default: 'test'
       });
     }
-    // Get playwright location from env
-    const playwrightLocation = process.env.PLAYWRIGHT_LOCATION;
+    let playwrightLocation = process.env.PLAYWRIGHT_LOCATION;
     if (!playwrightLocation) {
-      console.log(chalk.red('[ERROR] PLAYWRIGHT_LOCATION is not set in your .env file. Please set PLAYWRIGHT_LOCATION before running pwtgen gen.')); 
-      process.exit(1);
+      console.log(chalk.yellow('[INFO] PLAYWRIGHT_LOCATION is not set in your .env file.'));
+      const { setLocation } = await inquirer.prompt([
+        {
+          type: 'confirm',
+          name: 'setLocation',
+          message: 'Would you like to set PLAYWRIGHT_LOCATION now?',
+          default: true
+        }
+      ]);
+      if (setLocation) {
+        const { locationPath } = await inquirer.prompt([
+          {
+            type: 'input',
+            name: 'locationPath',
+            message: 'Enter the path where Playwright tests should be saved (e.g., playwright/public):',
+            validate: (input: string) => input ? true : 'Path required.'
+          }
+        ]);
+        // Update .env file
+        const fs = await import('fs');
+        const envPath = '.env';
+        let envContent = '';
+        try {
+          envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
+        } catch {}
+        if (!envContent.includes('PLAYWRIGHT_LOCATION')) {
+          envContent += (envContent.endsWith('\n') ? '' : '\n') + `PLAYWRIGHT_LOCATION=${locationPath}\n`;
+        } else {
+          envContent = envContent.replace(/PLAYWRIGHT_LOCATION=.*/g, `PLAYWRIGHT_LOCATION=${locationPath}`);
+        }
+        fs.writeFileSync(envPath, envContent, 'utf8');
+        console.log(chalk.green(`[INFO] .env updated with PLAYWRIGHT_LOCATION=${locationPath}`));
+        playwrightLocation = locationPath;
+        // Reload env
+        dotenvConfig();
+      } else {
+        console.log(chalk.red('[ERROR] Please set PLAYWRIGHT_LOCATION in your .env file and rerun the command.'));
+        process.exit(1);
+      }
     }
     let outputPath;
     if (playwrightLocation) {
@@ -356,14 +391,6 @@ async function buildTestConfig(options: GenerateOptions): Promise<TestConfig> {
         message: `Enter Playwright test name (will be saved to ${playwrightLocation}/<name>.test.ts):`,
         validate: (input: string) => input ? true : 'Test name required.'
       });
-    } else {
-      questions.push({
-        type: 'input',
-        name: 'outputPath',
-        message: 'Enter full output file path (e.g. playwright/public/failed-login.test.ts):',
-        validate: (input: string) => input ? true : 'Output file path required.'
-      });
-      logInfo('Warning: PLAYWRIGHT_LOCATION is not set in your .env file. Please set it for easier test file management.');
     }
     questions.push({
       type: 'confirm',
@@ -372,12 +399,7 @@ async function buildTestConfig(options: GenerateOptions): Promise<TestConfig> {
       default: !!options.overwrite
     });
     const answers = questions.length > 0 ? await inquirer.prompt(questions) : {};
-    if (playwrightLocation) {
-      outputPath = `${playwrightLocation}/${answers.testName}.test.ts`;
-    } else {
-      outputPath = answers.outputPath;
-    }
-    // Add .test.ts extension if not present
+    outputPath = `${playwrightLocation}/${answers.testName}.test.ts`;
     if (outputPath && !outputPath.endsWith('.test.ts')) {
       outputPath = outputPath + '.test.ts';
     }

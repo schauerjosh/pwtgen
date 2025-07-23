@@ -36,16 +36,15 @@ program
   .option('--overwrite', 'Overwrite existing test file', false)
   .action(async (options) => {
     const spinner = ora('Building configuration...').start();
-
     try {
-      // Prompt for all args, even if provided
+      // Prompt for ticket and environment
       const answers = await inquirer.prompt([
         {
           type: 'input',
           name: 'ticket',
           message: 'Enter Jira ticket key:',
           default: options.ticket,
-          validate: (input: string) => /^[A-Z]+-\d+$/.test(input) || 'Invalid Jira ticket key'
+          validate: (input) => /^[A-Z]+-\d+$/.test(input) || 'Invalid Jira ticket key'
         },
         {
           type: 'list',
@@ -53,41 +52,67 @@ program
           message: 'Select target environment:',
           choices: ['test', 'qa', 'staging', 'prod'],
           default: options.env || 'test'
-        },
-        {
-          type: 'input',
-          name: 'output',
-          message: 'Enter output file path:',
-          default: options.output || ((answers: { ticket: string }) => `tests/e2e/${(options.ticket || answers.ticket).toLowerCase()}.spec.ts`)
-        },
-        {
-          type: 'confirm',
-          name: 'overwrite',
-          message: 'Overwrite existing test file if it exists?',
-          default: !!options.overwrite
         }
       ]);
       const ticket = answers.ticket;
       const env = answers.environment;
-      const output = answers.output;
-      const overwrite = answers.overwrite;
-
-      if (!ENV_URLS[env]) {
-        spinner.fail(`No URL configured for environment "${env}". Check your .env file.`);
-        process.exit(1);
+      let playwrightLocation = process.env.PLAYWRIGHT_LOCATION;
+      if (!playwrightLocation) {
+        console.log(chalk.yellow('[INFO] PLAYWRIGHT_LOCATION is not set in your .env file.'));
+        const { setLocation } = await inquirer.prompt([
+          {
+            type: 'confirm',
+            name: 'setLocation',
+            message: 'Would you like to set PLAYWRIGHT_LOCATION now?',
+            default: true
+          }
+        ]);
+        if (setLocation) {
+          const { locationPath } = await inquirer.prompt([
+            {
+              type: 'input',
+              name: 'locationPath',
+              message: 'Enter the path where Playwright tests should be saved (e.g., playwright/public):',
+              validate: (input) => input ? true : 'Path required.'
+            }
+          ]);
+          // Update .env file
+          let envContent = '';
+          try {
+            envContent = fs.existsSync('.env') ? fs.readFileSync('.env', 'utf8') : '';
+          } catch { /* ignore error */ }
+          if (!envContent.includes('PLAYWRIGHT_LOCATION')) {
+            envContent += (envContent.endsWith('\n') ? '' : '\n') + `PLAYWRIGHT_LOCATION=${locationPath}\n`;
+          } else {
+            envContent = envContent.replace(/PLAYWRIGHT_LOCATION=.*/g, `PLAYWRIGHT_LOCATION=${locationPath}`);
+          }
+          fs.writeFileSync('.env', envContent, 'utf8');
+          console.log(chalk.green(`[INFO] .env updated with PLAYWRIGHT_LOCATION=${locationPath}`));
+          playwrightLocation = locationPath;
+        } else {
+          console.log(chalk.red('[ERROR] Please set PLAYWRIGHT_LOCATION in your .env file and rerun the command.'));
+          process.exit(1);
+        }
       }
-
+      // Prompt for test name only
+      const { testName } = await inquirer.prompt([
+        {
+          type: 'input',
+          name: 'testName',
+          message: `Enter Playwright test name (will be saved to ${playwrightLocation}/<name>.test.ts):`,
+          validate: (input) => input ? true : 'Test name required.'
+        }
+      ]);
+      const output = `${playwrightLocation}/${testName}.test.ts`;
+      const overwrite = options.overwrite;
       if (fs.existsSync(output) && !overwrite) {
         spinner.fail(`File ${output} already exists. Use --overwrite to replace it.`);
         process.exit(1);
       }
-
       spinner.succeed('Configuration built successfully');
       const mcp = new MCPService();
-
       // Interactive dev intervention handler
       const onIntervention = async (step: { stepIndex: number; description: string; suggestedCode: string }) => {
-        // If step 1, update the prompt to show the actual environment URL
         let promptEnvUrl = '';
         if (step.stepIndex === 0 && ENV_URLS[env]) {
           promptEnvUrl = ENV_URLS[env];
@@ -130,21 +155,18 @@ program
         }
         return step.suggestedCode;
       };
-
       const genSpinner = ora('Generating Playwright test...').start();
       const result = await mcp.generateTestFromTicket(
         { ticket, env, outputPath: output },
         onIntervention
       );
       genSpinner.succeed('Test generated!');
-
       // Ensure output directory exists
       const outputDir = path.dirname(output);
       if (!fs.existsSync(outputDir)) {
         fs.mkdirSync(outputDir, { recursive: true });
       }
       fs.writeFileSync(output, result.code, 'utf-8');
-
       logInfo(chalk.green(`\n✅ Test generated: ${output}`));
       logInfo(chalk.blue(`📋 Ticket: ${ticket}`));
       logInfo(chalk.blue(`🎯 Environment: ${env} (${ENV_URLS[env]})`));

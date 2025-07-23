@@ -344,6 +344,10 @@ async function buildTestConfig(options: GenerateOptions): Promise<TestConfig> {
     }
     // Get playwright location from env
     const playwrightLocation = process.env.PLAYWRIGHT_LOCATION;
+    if (!playwrightLocation) {
+      console.log(chalk.red('[ERROR] PLAYWRIGHT_LOCATION is not set in your .env file. Please set PLAYWRIGHT_LOCATION before running pwtgen gen.')); 
+      process.exit(1);
+    }
     let outputPath;
     if (playwrightLocation) {
       questions.push({

@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
-import inquirer from 'inquirer';
 import chalk from 'chalk';
 import ora from 'ora';
 import { config } from 'dotenv';
@@ -9,6 +8,9 @@ import { SelfHealingService } from './core/SelfHealingService.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import pkg from '../package.json' with { type: 'json' };
+import inquirer from 'inquirer';
+import { CodeFormatter } from './utils/CodeFormatter.js';
+import { logger } from './utils/logger.js';
 
 // Load environment variables from .env
 config();
@@ -45,7 +47,7 @@ program
           name: 'ticket',
           message: 'Enter Jira ticket key:',
           default: options.ticket,
-          validate: (input) => /^[A-Z]+-\d+$/.test(input) || 'Invalid Jira ticket key'
+          validate: (input: string) => /^[A-Z]+-\d+$/.test(input) || 'Invalid Jira ticket key'
         },
         {
           type: 'list',
@@ -74,7 +76,7 @@ program
               type: 'input',
               name: 'locationPath',
               message: 'Enter the path where Playwright tests should be saved (e.g., playwright/public):',
-              validate: (input) => input ? true : 'Path required.'
+              validate: (input: string) => input ? true : 'Path required.'
             }
           ]);
           // Update .env file
@@ -101,7 +103,7 @@ program
           type: 'input',
           name: 'testName',
           message: `Enter Playwright test name (will be saved to ${playwrightLocation}/<name>.test.ts):`,
-          validate: (input) => input ? true : 'Test name required.'
+          validate: (input: string) => input ? true : 'Test name required.'
         }
       ]);
       const output = `${playwrightLocation}/${testName}.test.ts`;
@@ -167,7 +169,20 @@ program
       if (!fs.existsSync(outputDir)) {
         fs.mkdirSync(outputDir, { recursive: true });
       }
-      fs.writeFileSync(output, result.code, 'utf-8');
+      const formatter = new CodeFormatter();
+      let formattedCode = await formatter.format(result.code);
+
+      // Lint validation: check for missing/extra brackets (simple check)
+      const openBrackets = (formattedCode.match(/\{/g) || []).length;
+      const closeBrackets = (formattedCode.match(/\}/g) || []).length;
+      if (openBrackets !== closeBrackets) {
+        logger.warn(`Bracket mismatch detected: {=${openBrackets}, }=${closeBrackets}. Please review the generated code.`);
+      }
+
+      // Format with tab spacing of 4
+      formattedCode = formattedCode.replace(/^( +)/gm, (m) => '\t'.repeat(Math.ceil(m.length / 4)));
+
+      fs.writeFileSync(output, formattedCode, 'utf-8');
       logInfo(chalk.green(`\n✅ Test generated: ${output}`));
       logInfo(chalk.blue(`📋 Ticket: ${ticket}`));
       logInfo(chalk.blue(`🎯 Environment: ${env} (${ENV_URLS[env]})`));
@@ -201,11 +216,24 @@ program
 program
   .option('--debug', 'Enable debug/info logging', false);
 
-program.parseAsync(process.argv).then(() => {
-  debugMode = program.opts().debug;
-});
+// Prompt for debug mode if not provided
+if (!process.argv.includes('--debug')) {
+  const { enableDebug } = await inquirer.prompt([
+    {
+      type: 'confirm',
+      name: 'enableDebug',
+      message: 'Enable debug/info logging?',
+      default: false
+    }
+  ]);
+  if (enableDebug) {
+    process.argv.push('--debug');
+  }
+}
 
-let debugMode = false;
+program.parseAsync(process.argv);
+
+const debugMode = false;
 function logInfo(message: string) {
   if (debugMode) {
     console.log(chalk.blue('[INFO]'), message);

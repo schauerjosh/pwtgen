@@ -16,7 +16,7 @@ import { TestGenerator } from './core/TestGenerator.js';
 import { JiraClient } from './jira/JiraClient.js';
 import { validateConfig } from './utils/validation.js';
 import { logger } from './utils/logger.js';
-import type { TestConfig, Environment } from './types/index.js';
+import type { TestConfig, Environment, RAGContext, GeneratedTest } from './types/index.js';
 import pkg from '../package.json' with { type: 'json' };
 
 dotenvConfig();
@@ -261,15 +261,7 @@ async function buildTestConfig(options: GenerateOptions): Promise<TestConfig> {
         }
       });
     }
-    if (!options.env) {
-      questions.push({
-        type: 'list',
-        name: 'environment',
-        message: 'Select target environment:',
-        choices: ['test', 'qa', 'staging', 'prod'],
-        default: 'test'
-      });
-    }
+    // Remove environment prompt here, always use options.env
     let playwrightLocation = process.env.PLAYWRIGHT_LOCATION;
     if (!playwrightLocation) {
       console.log(chalk.yellow('[INFO] PLAYWRIGHT_LOCATION is not set in your .env file.'));
@@ -337,7 +329,7 @@ async function buildTestConfig(options: GenerateOptions): Promise<TestConfig> {
     const ticket = await jiraClient.getTicket(options.ticket || answers.ticket);
     const config: TestConfig = {
       ticket,
-      environment: (options.env || answers.environment) as Environment,
+      environment: options.env as Environment,
       outputPath,
       overwrite: answers.overwrite ?? options.overwrite,
       dryRun: false,
@@ -515,6 +507,7 @@ async function generateTest(config: TestConfig, interactive = false): Promise<vo
       await fs.appendFile(mappingFile, mappingText);
       console.log(chalk.green('Intervention mapping appended to ' + mappingFile));
     }
+    logTestSummary(result, config);
   } catch (error) {
     spinner.fail('Failed to generate test');
     logger.error(error);
@@ -537,21 +530,48 @@ async function embedKnowledgeBase() {
   // ...existing embedding logic...
 }
 
-// Set debugMode from CLI option
-program.option('--debug', 'Enable debug/info logging', false);
-program.parseAsync(process.argv).then(() => {
-  debugMode = program.opts().debug;
-});
+program
+  .command('self-heal')
+  .description('Run self-healing on an existing test file')
+  .option('-f, --file <path>', 'Test file to heal')
+  .action(async (options) => {
+    if (!options.file) {
+      console.error(chalk.red('Missing --file argument'));
+      process.exit(1);
+    }
+    const { SelfHealingService } = await import('./core/SelfHealingService.js');
+    const sh = new SelfHealingService();
+    const result = await sh.healTestFile(options.file);
+    logInfo(chalk.green('🔧 Self-healing result:') + ' ' + JSON.stringify(result));
+  });
 
-program.parse(process.argv);
+// Prompt for debug mode if not provided
+if (!process.argv.includes('--debug')) {
+  const { enableDebug } = await inquirer.prompt([
+    {
+      type: 'confirm',
+      name: 'enableDebug',
+      message: 'Enable debug/info logging?',
+      default: false
+    }
+  ]);
+  if (enableDebug) {
+    process.argv.push('--debug');
+    debugMode = true;
+  }
+}
 
-// Replace info/debug console.log calls with logInfo
-// Example:
-// logInfo('Starting test generation...');
-// logInfo(`Launching Playwright in record mode for: ${url}`);
-// logInfo(`Prompting for vCreative credentials...`);
-// logInfo(`Step ${i + 1}:`);
-// logInfo(steps[i]);
-// logInfo('You are about to intervene or take manual action in Playwright (record new steps).');
-// logInfo(`Launching Playwright codegen for: ${url} with file: ${testFilePath}`);
-// logInfo(`Edited actions recorded and saved to ${testFilePath}`);
+// Improved output for test generation
+function logTestSummary(result: GeneratedTest & { content: string, ragContexts?: RAGContext[], confidence?: number, testName?: string }, config: TestConfig) {
+  console.log(chalk.green(`\n✅ Test generated: ${config.outputPath}`));
+  console.log(chalk.blue(`📋 Ticket: ${config.ticket.key} - ${config.ticket.summary}`));
+  console.log(chalk.blue(`🎯 Environment: ${config.environment}`));
+  console.log(chalk.blue(`📁 Output: ${config.outputPath}`));
+  console.log(chalk.blue(`🧪 Test name: ${result.testName}`));
+  if (result.ragContexts) {
+    console.log(chalk.blue(`📊 Contexts: ${result.ragContexts.length}`));
+  }
+  if (result.confidence !== undefined) {
+    console.log(chalk.blue(`🧠 Confidence: ${Math.round(result.confidence * 100)}%`));
+  }
+}

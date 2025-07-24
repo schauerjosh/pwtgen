@@ -3,19 +3,19 @@
 ## Generate Playwright Test from Natural Language
 
 ```bash
-npx ts-node src/cli-enhanced.ts generate-test --description "Login to the dashboard" --url "https://example.com" --testName "login test"
+npx ts-node src/cli.ts generate-test --description "Login to the dashboard" --url "https://example.com" --testName "login test"
 ```
 
 For interactive mode (step-by-step developer intervention):
 
 ```bash
-npx ts-node src/cli-enhanced.ts generate-test --description "Login to the dashboard" --url "https://example.com" --testName "login test" --interactive
+npx ts-node src/cli.ts generate-test --description "Login to the dashboard" --url "https://example.com" --testName "login test" --interactive
 ```
 
 ## Run Self-Healing on Existing Test
 
 ```bash
-npx ts-node src/cli-enhanced.ts self-heal --file "tests/login.spec.ts"
+npx ts-node src/cli.ts self-heal --file "tests/login.spec.ts"
 ```
 
 ---
@@ -78,20 +78,20 @@ npm install playwright typescript ts-node
 Run:
 
 ```bash
-npx ts-node src/cli-enhanced.ts generate-test --description "Login to the dashboard" --url "https://example.com" --testName "login test"
+npx ts-node src/cli.ts generate-test --description "Login to the dashboard" --url "https://example.com" --testName "login test"
 ```
 
 For interactive mode:
 
 ```bash
-npx ts-node src/cli-enhanced.ts generate-test --description "Login to the dashboard" --url "https://example.com" --testName "login test" --interactive
+npx ts-node src/cli.ts generate-test --description "Login to the dashboard" --url "https://example.com" --testName "login test" --interactive
 ```
 
 ## 4. Run Self-Healing
 To heal selectors in an existing test file:
 
 ```bash
-npx ts-node src/cli-enhanced.ts self-heal --file "sample-generated-test.spec.ts"
+npx ts-node src/cli.ts self-heal --file "sample-generated-test.spec.ts"
 ```
 
 ## 5. Review Documentation

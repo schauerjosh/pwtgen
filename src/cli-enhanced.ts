@@ -8,6 +8,7 @@ import { MCPService } from './core/MCPService.js';
 import { SelfHealingService } from './core/SelfHealingService.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import pkg from '../package.json' with { type: 'json' };
 
 // Load environment variables from .env
 config();
@@ -24,7 +25,7 @@ const ENV_URLS: Record<string, string> = {
 program
   .name('pwtgen')
   .description('AI-Powered Playwright Test Generator CLI')
-  .version('2.0.0');
+  .version(pkg.version);
 
 program
   .command('generate')

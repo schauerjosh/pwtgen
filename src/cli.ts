@@ -17,6 +17,7 @@ import { JiraClient } from './jira/JiraClient.js';
 import { validateConfig } from './utils/validation.js';
 import { logger } from './utils/logger.js';
 import type { TestConfig, Environment } from './types/index.js';
+import pkg from '../package.json' with { type: 'json' };
 
 dotenvConfig();
 
@@ -25,7 +26,7 @@ const program = new Command();
 program
   .name('pwtgen')
   .description('AI-Powered Playwright Test Generator CLI')
-  .version('2.0.0');
+  .version(pkg.version);
 
 let debugMode = false;
 function logInfo(message: string) {

@@ -120,7 +120,7 @@ export class TestGenerator {
 CRITICAL REQUIREMENTS:
 1. Use ONLY selectors and patterns from the provided context - never hallucinate selectors
 2. Implement proper waiting strategies with expect() assertions
-3. Use page object pattern when specified
+3. Do NOT use page object pattern or external imports unless explicitly specified in the context or configuration. Prefer inline Playwright code for all actions.
 4. Include proper error handling and retry logic
 5. Generate TypeScript code with proper imports
 6. Use environment variables for URLs and credentials
@@ -141,28 +141,15 @@ WAITING STRATEGY:
         const contextSection = contexts.length > 0
             ? `\n\nAVAILABLE CONTEXT:\n${contexts.map(ctx => `[${ctx.type.toUpperCase()}] (score: ${ctx.score.toFixed(2)})\n${ctx.content}`).join('\n\n---\n\n')}`
             : '';
-        const ticketSection = `\n\nJIRA TICKET:
-Key: ${config.ticket.key}
-Summary: ${config.ticket.summary}
-Description: ${config.ticket.description}
-${config.ticket.acceptanceCriteria ? `Acceptance Criteria:\n${config.ticket.acceptanceCriteria.map((c) => `- ${c}`).join('\n')}` : ''}`;
-        const configSection = `\n\nCONFIGURATION:
-Environment: ${config.environment}
-Page Objects: ${config.pageObjectPattern ? 'enabled' : 'disabled'}
-Base URL: Use the selected environment's base URL directly (e.g., "${getBaseUrl(config.environment)}") instead of process.env.TEST_BASE_URL`;
-        const instructionSection = `\n\nINSTRUCTIONS:
-Generate a complete Playwright test that:
-1. Follows the ticket requirements exactly
-2. Uses only the selectors/patterns from the provided context
-3. Implements proper page object pattern (if enabled)
-4. Includes comprehensive assertions for each step
-5. Handles authentication using environment variables
-6. Is resilient to timing issues and UI changes
-7. Use the test.step structure for each logical step in the test
-8. For login flows, always use getByRole for email, password, and login fields/buttons as shown in the best practices context
-9. For invalid login, verify error message and do not redirect
-10. Take a screenshot on failure using test.afterEach as shown in best practices context
-\n\nReturn ONLY the TypeScript test code, no explanations.`;
+        const ticketSection = `\n\nJIRA TICKET:\nKey: ${config.ticket.key}\nSummary: ${config.ticket.summary}\nDescription: ${config.ticket.description}\n${config.ticket.acceptanceCriteria ? `Acceptance Criteria:\n${config.ticket.acceptanceCriteria.map((c) => `- ${c}`).join('\n')}` : ''}`;
+        const configSection = `\n\nCONFIGURATION:\nEnvironment: ${config.environment}\nPage Objects: ${config.pageObjectPattern ? 'enabled' : 'disabled'}\nBase URL: Use the selected environment's base URL directly (e.g., "${getBaseUrl(config.environment)}") instead of process.env.TEST_BASE_URL`;
+        let instructionSection = `\n\nINSTRUCTIONS:\nGenerate a complete Playwright test that:\n1. Follows the ticket requirements exactly\n2. Uses only the selectors/patterns from the provided context\n3. Includes comprehensive assertions for each step\n4. Handles authentication using environment variables\n5. Is resilient to timing issues and UI changes\n6. Use the test.step structure for each logical step in the test\n7. For login flows, always use getByRole for email, password, and login fields/buttons as shown in the best practices context\n8. For invalid login, verify error message and do not redirect\n9. Take a screenshot on failure using test.afterEach as shown in best practices context\n\nReturn ONLY the TypeScript test code, no explanations.`;
+        if (config.pageObjectPattern) {
+            instructionSection = instructionSection.replace('Includes comprehensive assertions for each step', 'Implements proper page object pattern and includes comprehensive assertions for each step');
+        }
+        else {
+            instructionSection += '\n\nIMPORTANT: Do NOT use page object pattern or external imports. All code should be inline in the test file.';
+        }
         function getBaseUrl(env) {
             switch (env) {
                 case 'prod': return 'http://localhost:4200';

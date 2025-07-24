@@ -41,8 +41,43 @@ program
     .option('--no-page-objects', 'Generate without page object pattern', false)
     .option('--interactive', 'Enable dev intervention for each test step', false)
     .action(async (options) => {
+    // Prompt for missing values ONLY here
+    if (!options.ticket) {
+        const { ticket } = await inquirer.prompt([
+            {
+                type: 'input',
+                name: 'ticket',
+                message: 'Enter Jira ticket key:',
+                validate: (input) => /^[A-Z]+-\d+$/.test(input) ? true : 'Please enter a valid Jira ticket key (e.g., PROJ-123)'
+            }
+        ]);
+        options.ticket = ticket;
+    }
+    if (!options.env) {
+        const { env } = await inquirer.prompt([
+            {
+                type: 'list',
+                name: 'env',
+                message: 'Select target environment:',
+                choices: ['test', 'qa', 'staging', 'prod'],
+                default: 'test'
+            }
+        ]);
+        options.env = env;
+    }
+    if (!options.output) {
+        const { output } = await inquirer.prompt([
+            {
+                type: 'input',
+                name: 'output',
+                message: 'Enter output file path:',
+                default: `tests/e2e/${options.ticket.toLowerCase()}.spec.ts`
+            }
+        ]);
+        options.output = output;
+    }
     try {
-        const config = await buildTestConfig(options);
+        const config = await buildTestConfig(options); // buildTestConfig should NOT prompt for anything
         await generateTest(config, options.interactive);
     }
     catch (error) {
@@ -71,8 +106,64 @@ program
 program
     .command('record')
     .description('Launch a browser and record Playwright actions to generate a test (JIRA integration included)')
-    .action(async () => {
-    await handleRecordCommand();
+    .option('-e, --env <environment>', 'Target environment')
+    .option('-n, --name <testName>', 'Test name')
+    .option('-o, --output <path>', 'Test file path')
+    .action(async (options) => {
+    // Prompt for missing values ONLY here
+    const ENV_URLS = {
+        prod: process.env.PROD_BASE_URL || '',
+        test: process.env.TWO_TEST_BASE_URL || '',
+        qa: process.env.QA_BASE_URL || '',
+        staging: process.env.SMOKE_BASE_URL || ''
+    };
+    let env = options.env;
+    if (!env) {
+        const response = await inquirer.prompt([
+            {
+                type: 'list',
+                name: 'env',
+                message: 'Select the environment:',
+                choices: [
+                    { name: `prod (${ENV_URLS.prod})`, value: 'prod' },
+                    { name: `test (${ENV_URLS.test})`, value: 'test' },
+                    { name: `qa (${ENV_URLS.qa})`, value: 'qa' },
+                    { name: `staging (${ENV_URLS.staging})`, value: 'staging' }
+                ],
+                default: 'test',
+            },
+        ]);
+        env = response.env;
+        options.env = env;
+    }
+    let testName = options.testName || options.name;
+    if (!testName) {
+        const response = await inquirer.prompt([
+            {
+                type: 'input',
+                name: 'testName',
+                message: 'Enter Playwright test name:',
+                validate: (input) => input ? true : 'Test name required.'
+            }
+        ]);
+        testName = response.testName;
+        options.testName = testName;
+    }
+    let output = options.output;
+    if (!output) {
+        const response = await inquirer.prompt([
+            {
+                type: 'input',
+                name: 'output',
+                message: `Enter test file path (default: playwright/public/${testName}.test.ts):`,
+                default: `playwright/public/${testName}.test.ts`,
+                validate: (input) => input ? true : 'Test file path required.'
+            }
+        ]);
+        output = response.output;
+        options.output = output;
+    }
+    await handleRecordCommand({ ...options, env, testName, output });
 });
 program
     .command('interactive')
@@ -96,7 +187,7 @@ program
             {
                 type: 'list',
                 name: 'env',
-                message: 'Select the environment:',
+                message: 'Select [debug] the environment:',
                 choices: ['test', 'prod', 'qa', 'staging'],
                 default: 'test',
             }
@@ -107,7 +198,8 @@ program
     const config = await buildTestConfig(options);
     await generateTest(config, true);
 });
-async function handleRecordCommand() {
+async function handleRecordCommand(options = {}) {
+    // NO PROMPTS HERE, just use options
     logInfo('INSTRUCTIONS:');
     logInfo('1. You will select the environment and specify the file location for your Playwright test.');
     logInfo('2. A browser window will open to the selected environment URL.');
@@ -116,123 +208,15 @@ async function handleRecordCommand() {
     logInfo('5. Your actions will be automatically captured and saved as a Playwright test in the file you specify.');
     logInfo('6. To run your new test, use: npx playwright test <path-to-your-test-file>');
     logInfo('');
-    // Load environment URLs from .env or knowledge base
     const ENV_URLS = {
         prod: process.env.PROD_BASE_URL || '',
         test: process.env.TWO_TEST_BASE_URL || '',
         qa: process.env.QA_BASE_URL || '',
         staging: process.env.SMOKE_BASE_URL || ''
     };
-    const { env } = await inquirer.prompt([
-        {
-            type: 'list',
-            name: 'env',
-            message: 'Select the environment:',
-            choices: [
-                { name: `prod (${ENV_URLS.prod})`, value: 'prod' },
-                { name: `test (${ENV_URLS.test})`, value: 'test' },
-                { name: `qa (${ENV_URLS.qa})`, value: 'qa' },
-                { name: `staging (${ENV_URLS.staging})`, value: 'staging' }
-            ],
-            default: 'test',
-        },
-    ]);
-    const envKey = String(env);
+    const envKey = String(options.env);
     const url = ENV_URLS[envKey];
-    // Prompt for login credentials (integrate with KB if available)
-    let loginCredentials = undefined;
-    const { wantsLogin } = await inquirer.prompt([
-        {
-            type: 'confirm',
-            name: 'wantsLogin',
-            message: 'Do you want to provide login credentials (email/password)?',
-            default: false,
-        },
-    ]);
-    if (wantsLogin) {
-        loginCredentials = await inquirer.prompt([
-            {
-                type: 'input',
-                name: 'email',
-                message: 'Enter user email:',
-            },
-            {
-                type: 'input',
-                name: 'password',
-                message: 'Enter user password:',
-            },
-        ]);
-        // Save credentials as fixture
-        const fs = await import('fs');
-        const usersDir = 'playwright/fixtures/users';
-        fs.mkdirSync(usersDir, { recursive: true });
-        const usersFile = 'playwright/fixtures/users/users.json';
-        let users = [];
-        if (fs.existsSync(usersFile)) {
-            try {
-                users = JSON.parse(fs.readFileSync(usersFile, 'utf8'));
-            }
-            catch { /* ignore error */ }
-        }
-        users.push(loginCredentials);
-        fs.writeFileSync(usersFile, JSON.stringify(users, null, 2), 'utf8');
-        logInfo(`\n✅ Credentials saved to ${usersFile}`);
-    }
-    // Prompt for spot data or mock files (integrate with KB if available)
-    const { wantsSpotData } = await inquirer.prompt([
-        {
-            type: 'list',
-            name: 'wantsSpotData',
-            message: 'Do you want to provide specific spot data or use mock files?',
-            choices: [
-                { name: 'Provide specific spot data', value: 'specific' },
-                { name: 'Use mock files', value: 'mock' },
-                { name: 'No spot data needed', value: 'none' },
-            ],
-            default: 'none',
-        },
-    ]);
-    if (wantsSpotData === 'specific') {
-        const spotDetails = await inquirer.prompt([
-            { type: 'input', name: 'user', message: 'Which user? (email address)' },
-            { type: 'input', name: 'adtype', message: 'Which adtype?' },
-            { type: 'input', name: 'stations', message: 'Which stations?' },
-            { type: 'input', name: 'spotTitle', message: 'Spot title?' },
-            { type: 'input', name: 'startDate', message: 'Start date?' },
-            { type: 'input', name: 'endDate', message: 'End date?' },
-            { type: 'input', name: 'dueDate', message: 'Due date?' },
-            { type: 'input', name: 'status', message: 'Status?' },
-        ]);
-        const fs = await import('fs');
-        const spotsDir = 'playwright/fixtures/spots';
-        fs.mkdirSync(spotsDir, { recursive: true });
-        const spotsFile = 'playwright/fixtures/spots/spots.json';
-        let spots = [];
-        if (fs.existsSync(spotsFile)) {
-            try {
-                spots = JSON.parse(fs.readFileSync(spotsFile, 'utf8'));
-            }
-            catch { /* ignore error */ }
-        }
-        spots.push(spotDetails);
-        fs.writeFileSync(spotsFile, JSON.stringify(spots, null, 2), 'utf8');
-        logInfo(`\n✅ Spot data saved to ${spotsFile}`);
-    }
-    else if (wantsSpotData === 'mock') {
-        logInfo('\nUsing mock spot data files.');
-        // Optionally copy or reference mock files here
-    }
-    // Prompt for test file path and write mode
-    const { testFilePath } = await inquirer.prompt([
-        {
-            type: 'input',
-            name: 'testFilePath',
-            message: 'Enter the test file path:',
-            validate: input => input ? true : 'Test file path required.'
-        }
-    ]);
-    const pathModule = await import('path');
-    const absPath = pathModule.resolve(testFilePath);
+    const absPath = options.output;
     // Launch Playwright in record mode
     const { execSync } = await import('child_process');
     try {
@@ -263,136 +247,19 @@ async function handleRecordCommand() {
     }
 }
 // Utility to extract first valid user from test-users.md
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-async function getDefaultTestUser() {
-    const fs = await import('fs/promises');
-    // Resolve path relative to project root, regardless of src or dist
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = dirname(__filename);
-    // Try both possible locations
-    let userFile;
-    try {
-        userFile = join(__dirname, '../knowledge-base/fixtures/test-users.md');
-        return await tryParseUserFile(userFile, fs);
-    }
-    catch { /* ignore error, try next path */ }
-    try {
-        userFile = join(__dirname, '../../knowledge-base/fixtures/test-users.md');
-        return await tryParseUserFile(userFile, fs);
-    }
-    catch { /* ignore error, fallback to default */ }
-    return { email: 'testuser@example.com', password: 'password' };
-}
-async function tryParseUserFile(userFile, fs) {
-    const file = await fs.readFile(userFile, 'utf8');
-    const match = file.match(/export const validUsers = (\[[\s\S]*?\]);/);
-    if (match) {
-        const validUsers = eval(match[1]);
-        return validUsers[0];
-    }
-    throw new Error('No valid users found');
-}
 async function buildTestConfig(options) {
     try {
-        const questions = [];
-        if (!options.ticket) {
-            questions.push({
-                type: 'input',
-                name: 'ticket',
-                message: 'Enter Jira ticket key:',
-                validate: (input) => {
-                    if (!input.match(/^[A-Z]+-\d+$/)) {
-                        return 'Please enter a valid Jira ticket key (e.g., PROJ-123)';
-                    }
-                    return true;
-                }
-            });
-        }
-        if (!options.env) {
-            questions.push({
-                type: 'list',
-                name: 'environment',
-                message: 'Select target environment:',
-                choices: ['test', 'qa', 'staging', 'prod'],
-                default: 'test'
-            });
-        }
-        let playwrightLocation = process.env.PLAYWRIGHT_LOCATION;
-        if (!playwrightLocation) {
-            console.log(chalk.yellow('[INFO] PLAYWRIGHT_LOCATION is not set in your .env file.'));
-            const { setLocation } = await inquirer.prompt([
-                {
-                    type: 'confirm',
-                    name: 'setLocation',
-                    message: 'Would you like to set PLAYWRIGHT_LOCATION now?',
-                    default: true
-                }
-            ]);
-            if (setLocation) {
-                const { locationPath } = await inquirer.prompt([
-                    {
-                        type: 'input',
-                        name: 'locationPath',
-                        message: 'Enter the path where Playwright tests should be saved (e.g., playwright/public):',
-                        validate: (input) => input ? true : 'Path required.'
-                    }
-                ]);
-                // Update .env file
-                const fs = await import('fs');
-                const envPath = '.env';
-                let envContent = '';
-                try {
-                    envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
-                }
-                catch { }
-                if (!envContent.includes('PLAYWRIGHT_LOCATION')) {
-                    envContent += (envContent.endsWith('\n') ? '' : '\n') + `PLAYWRIGHT_LOCATION=${locationPath}\n`;
-                }
-                else {
-                    envContent = envContent.replace(/PLAYWRIGHT_LOCATION=.*/g, `PLAYWRIGHT_LOCATION=${locationPath}`);
-                }
-                fs.writeFileSync(envPath, envContent, 'utf8');
-                console.log(chalk.green(`[INFO] .env updated with PLAYWRIGHT_LOCATION=${locationPath}`));
-                playwrightLocation = locationPath;
-                // Reload env
-                dotenvConfig();
-            }
-            else {
-                console.log(chalk.red('[ERROR] Please set PLAYWRIGHT_LOCATION in your .env file and rerun the command.'));
-                process.exit(1);
-            }
-        }
-        let outputPath;
-        if (playwrightLocation) {
-            questions.push({
-                type: 'input',
-                name: 'testName',
-                message: `Enter Playwright test name (will be saved to ${playwrightLocation}/<name>.test.ts):`,
-                validate: (input) => input ? true : 'Test name required.'
-            });
-        }
-        questions.push({
-            type: 'confirm',
-            name: 'overwrite',
-            message: 'Overwrite existing test file if it exists?',
-            default: !!options.overwrite
-        });
-        const answers = questions.length > 0 ? await inquirer.prompt(questions) : {};
-        outputPath = `${playwrightLocation}/${answers.testName}.test.ts`;
-        if (outputPath && !outputPath.endsWith('.test.ts')) {
-            outputPath = outputPath + '.test.ts';
-        }
+        // NO PROMPTS HERE, just use options
         const spinner = ora('Building configuration...').start();
         const jiraClient = new JiraClient();
-        const ticket = await jiraClient.getTicket(options.ticket || answers.ticket);
+        const ticket = await jiraClient.getTicket(options.ticket);
         const config = {
             ticket,
-            environment: (options.env || answers.environment),
-            outputPath,
-            overwrite: answers.overwrite ?? options.overwrite,
-            dryRun: false,
-            pageObjectPattern: false
+            environment: options.env,
+            outputPath: options.output,
+            overwrite: options.overwrite,
+            dryRun: options.dryRun,
+            pageObjectPattern: options.noPageObjects !== true
         };
         spinner.succeed('Configuration built successfully');
         return validateConfig(config);
@@ -410,7 +277,6 @@ async function generateTest(config, interactive = false) {
         const generator = new TestGenerator();
         let interventionIndex = null;
         let interventionCode = '';
-        let manualSteps = '';
         let steps = [];
         if (interactive) {
             // Dev intervention loop
@@ -508,7 +374,7 @@ async function generateTest(config, interactive = false) {
                     logInfo(`\n✅ Manual actions recorded and saved to ${codegenPath}`);
                     // Read manual steps
                     const fs = await import('fs/promises');
-                    manualSteps = await fs.readFile(codegenPath, 'utf8');
+                    await fs.readFile(codegenPath, 'utf8');
                 }
                 catch (err) {
                     console.error('Error recording manual actions:', err);
@@ -537,88 +403,15 @@ async function generateTest(config, interactive = false) {
             const aiSteps = await generator['generateTestCode'](config, ragContexts);
             steps = aiSteps.split(/(?=await test\.step)/g);
         }
-        // Merge AI/dev steps and manual steps into a single, robust pipeline
-        const filteredSteps = steps.filter(Boolean).map((step) => {
-            if (/^import\s+\{\s*expect,?\s*test\s*\}/.test(step))
-                return '';
-            if (/^test\.describe\(/.test(step))
-                return '';
-            if (/^test\('/.test(step))
-                return '';
-            if (/^test\.afterEach\(/.test(step))
-                return '';
-            if (/^test\.beforeEach\(/.test(step))
-                return '';
-            return step;
-        }).filter(Boolean);
         // Get the base URL for the selected environment
         const { TestGeneratorUtils } = await import('./core/TestGenerator.js');
-        const baseUrl = TestGeneratorUtils.getBaseUrl(config.environment);
-        // Use credentials from vCreativeCredentials, .env, or test-users.md
-        let email, password;
-        if (config.vCreativeCredentials && config.vCreativeCredentials.email && config.vCreativeCredentials.password) {
-            email = config.vCreativeCredentials.email;
-            password = config.vCreativeCredentials.password;
-        }
-        else if (process.env.TEST_EMAIL && process.env.TEST_PASSWORD) {
-            email = process.env.TEST_EMAIL;
-            password = process.env.TEST_PASSWORD;
-        }
-        else {
-            const user = await getDefaultTestUser();
-            email = user.email;
-            password = user.password;
-        }
-        // Generate login steps
-        const loginSteps = `\n    await page.goto('${baseUrl}/login');\n    await page.getByRole('textbox', { name: 'Email' }).fill('${email}');\n    await page.getByRole('textbox', { name: 'Password' }).fill('${password}');\n    await page.getByRole('button', { name: /login/i }).click();\n    await expect(page).toHaveURL(/dashboard|home|main/i); // Adjust as needed\n    `;
-        const mergedSteps = filteredSteps.join('\n\n');
-        let mergedCode = 'import { expect, test } from "@playwright/test";\n\n';
-        mergedCode += 'test.describe(\'Calendar View Functionality\', () => {\n';
-        mergedCode += '  test.beforeEach(async ({ page }) => {\n' + loginSteps + '  });\n\n';
-        mergedCode += '  test(\'Verify Calendar View and Functionality\', async ({ page }) => {\n';
-        mergedCode += mergedSteps.split('\n').map(line => '    ' + line).join('\n') + '\n';
-        mergedCode += '  });\n\n';
-        mergedCode += '  test.afterEach(async ({ page }, testInfo) => {\n';
-        mergedCode += '    if (testInfo.status !== testInfo.expectedStatus) {\n';
-        mergedCode += '      await page.screenshot({ path: `screenshots/' + '${testInfo.title}' + '.png`, fullPage: true });\n';
-        mergedCode += '    }\n';
-        mergedCode += '  });\n';
-        mergedCode += '});\n';
-        // Remove duplicate Playwright imports
-        mergedCode = mergedCode.replace(/(import\s+\{\s*expect,?\s*test\s*\}\s+from\s+'@playwright\/test';?\s*)+/g, 'import { expect, test } from "@playwright/test";\n');
-        // When merging manual steps, robustly strip all imports and all Playwright block statements (test, test.describe, test.beforeEach, test.afterEach, etc.) from manual/dev intervention code before merging. Only keep the step/action code. Update merging logic to handle all edge cases and prevent nested blocks.
-        if (manualSteps) {
-            // Remove all import statements (anywhere in the code, not just at the start of lines)
-            let cleaned = manualSteps.replace(/import\s+\{?[^\n;]*\}?\s+from\s+['"][^'"]+['"];?/g, '').replace(/^import[^\n]*\n?/gm, '').trim();
-            // Remove all test.describe, test.beforeEach, test.afterEach, and similar Playwright block statements (including their bodies)
-            const blockPatterns = [
-                /test\s*\.\s*describe\s*\([^)]*\)\s*{[\s\S]*?^\s*}\s*$/gm,
-                /test\s*\.\s*beforeEach\s*\([^)]*\)\s*{[\s\S]*?^\s*}\s*$/gm,
-                /test\s*\.\s*afterEach\s*\([^)]*\)\s*{[\s\S]*?^\s*}\s*$/gm,
-                /test\s*\([^)]*\)\s*{[\s\S]*?^\s*}\s*$/gm
-            ];
-            for (const pattern of blockPatterns) {
-                cleaned = cleaned.replace(pattern, '');
-            }
-            // Remove any remaining describe(...) blocks (non-Playwright)
-            cleaned = cleaned.replace(/describe\s*\([^)]*\)\s*{[\s\S]*?^\s*}\s*$/gm, '');
-            // Remove any remaining beforeEach/afterEach blocks (non-Playwright)
-            cleaned = cleaned.replace(/beforeEach\s*\([^)]*\)\s*{[\s\S]*?^\s*}\s*$/gm, '');
-            cleaned = cleaned.replace(/afterEach\s*\([^)]*\)\s*{[\s\S]*?^\s*}\s*$/gm, '');
-            // Remove any leftover empty lines
-            cleaned = cleaned.replace(/^[ \t]*\n/gm, '');
-            cleaned = cleaned.trim();
-            // If nothing left, fallback to original manualSteps
-            if (!cleaned)
-                cleaned = manualSteps;
-            // Indent and annotate
-            if (!mergedCode.includes(cleaned.substring(0, 40))) {
-                mergedCode += '\n\n// Manual steps recorded (dev intervention):\n' + cleaned.split('\n').map(line => '    ' + line).join('\n');
-            }
-        }
+        // Remove unused baseUrl, email, password variables
+        // Remove loginSteps variable and any code that references it
+        // Instead, just call generator.generate(config) and use the returned code
+        const result = await generator.generate(config);
+        const mergedCode = result.content;
         // Write final merged code to output path
         const fs = await import('fs/promises');
-        // Fix for Windows EISDIR error: if outputPath is a directory, rename it to .bak_<timestamp> and proceed
         try {
             const stats = await fs.stat(config.outputPath);
             if (stats.isDirectory()) {
@@ -647,6 +440,7 @@ async function generateTest(config, interactive = false) {
             await fs.appendFile(mappingFile, mappingText);
             console.log(chalk.green('Intervention mapping appended to ' + mappingFile));
         }
+        logTestSummary(result, config);
     }
     catch (error) {
         spinner.fail('Failed to generate test');
@@ -666,20 +460,47 @@ async function embedKnowledgeBase() {
     console.log('Embedding knowledge base...');
     // ...existing embedding logic...
 }
-// Set debugMode from CLI option
-program.option('--debug', 'Enable debug/info logging', false);
-program.parseAsync(process.argv).then(() => {
-    debugMode = program.opts().debug;
+program
+    .command('self-heal')
+    .description('Run self-healing on an existing test file')
+    .option('-f, --file <path>', 'Test file to heal')
+    .action(async (options) => {
+    if (!options.file) {
+        console.error(chalk.red('Missing --file argument'));
+        process.exit(1);
+    }
+    const { SelfHealingService } = await import('./core/SelfHealingService.js');
+    const sh = new SelfHealingService();
+    const result = await sh.healTestFile(options.file);
+    logInfo(chalk.green('🔧 Self-healing result:') + ' ' + JSON.stringify(result));
 });
-program.parse(process.argv);
-// Replace info/debug console.log calls with logInfo
-// Example:
-// logInfo('Starting test generation...');
-// logInfo(`Launching Playwright in record mode for: ${url}`);
-// logInfo(`Prompting for vCreative credentials...`);
-// logInfo(`Step ${i + 1}:`);
-// logInfo(steps[i]);
-// logInfo('You are about to intervene or take manual action in Playwright (record new steps).');
-// logInfo(`Launching Playwright codegen for: ${url} with file: ${testFilePath}`);
-// logInfo(`Edited actions recorded and saved to ${testFilePath}`);
+// Prompt for debug mode if not provided
+if (!process.argv.includes('--debug')) {
+    const { enableDebug } = await inquirer.prompt([
+        {
+            type: 'confirm',
+            name: 'enableDebug',
+            message: 'Enable debug/info logging?',
+            default: false
+        }
+    ]);
+    if (enableDebug) {
+        process.argv.push('--debug');
+        debugMode = true;
+    }
+}
+// Improved output for test generation
+function logTestSummary(result, config) {
+    console.log(chalk.green(`\n✅ Test generated: ${config.outputPath}`));
+    console.log(chalk.blue(`📋 Ticket: ${config.ticket.key} - ${config.ticket.summary}`));
+    console.log(chalk.blue(`🎯 Environment: ${config.environment}`));
+    console.log(chalk.blue(`📁 Output: ${config.outputPath}`));
+    console.log(chalk.blue(`🧪 Test name: ${result.testName}`));
+    if (result.ragContexts) {
+        console.log(chalk.blue(`📊 Contexts: ${result.ragContexts.length}`));
+    }
+    if (result.confidence !== undefined) {
+        console.log(chalk.blue(`🧠 Confidence: ${Math.round(result.confidence * 100)}%`));
+    }
+}
 //# sourceMappingURL=cli.js.map

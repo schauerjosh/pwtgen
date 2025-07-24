@@ -5,6 +5,14 @@ export declare class TestGenerator {
     private codeGenerator;
     private formatter;
     constructor();
+    /**
+     * Optimize and clean up the final merged test code using OpenAI before saving.
+     */
+    private optimizeFinalCodeWithOpenAI;
+    /**
+     * Utility to determine if login should be prepended based on Jira card content.
+     */
+    private shouldPrependLogin;
     generate(config: TestConfig): Promise<GeneratedTest & {
         content: string;
     }>;

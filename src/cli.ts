@@ -47,6 +47,17 @@ program
   .option('--no-page-objects', 'Generate without page object pattern', false)
   .option('--interactive', 'Enable dev intervention for each test step', false)
   .action(async (options) => {
+    if (!options.ticket) {
+      const { ticket } = await inquirer.prompt([
+        {
+          type: 'input',
+          name: 'ticket',
+          message: 'Enter Jira ticket key:',
+          validate: (input: string) => /^[A-Z]+-\d+$/.test(input) ? true : 'Please enter a valid Jira ticket key (e.g., PROJ-123)'
+        }
+      ]);
+      options.ticket = ticket;
+    }
     try {
       const config = await buildTestConfig(options);
       await generateTest(config, options.interactive);
@@ -262,19 +273,20 @@ interface RecordOptions extends GenerateOptions {
 async function buildTestConfig(options: GenerateOptions): Promise<TestConfig> {
   try {
     const questions = [];
-    if (!options.ticket) {
-      questions.push({
-        type: 'input',
-        name: 'ticket',
-        message: 'Enter Jira ticket key:',
-        validate: (input: string) => {
-          if (!input.match(/^[A-Z]+-\d+$/)) {
-            return 'Please enter a valid Jira ticket key (e.g., PROJ-123)';
-          }
-          return true;
-        }
-      });
-    }
+    // Only prompt for ticket if not set
+    // if (!options.ticket) {
+    //   questions.push({
+    //     type: 'input',
+    //     name: 'ticket',
+    //     message: 'Enter Jira ticket key:',
+    //     validate: (input: string) => {
+    //       if (!input.match(/^[A-Z]+-\d+$/)) {
+    //         return 'Please enter a valid Jira ticket key (e.g., PROJ-123)';
+    //       }
+    //       return true;
+    //     }
+    //   });
+    // }
     // Remove environment prompt here, always use options.env
     let playwrightLocation = process.env.PLAYWRIGHT_LOCATION;
     if (!playwrightLocation) {

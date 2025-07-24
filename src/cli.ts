@@ -118,7 +118,90 @@ program
   .option('-e, --env <environment>', 'Target environment')
   .option('-n, --name <testName>', 'Test name')
   .action(async (options: RecordOptions) => {
-    await handleRecordCommand(options);
+    if ((global as any).recordHandlerInvoked) {
+      console.log(chalk.red('[DEBUG] Record handler already invoked, skipping duplicate execution.'));
+      return;
+    }
+    (global as any).recordHandlerInvoked = true;
+    console.log(chalk.blue('[DEBUG] Record handler invoked'));
+    // Prompt for missing values ONLY here
+    const ENV_URLS = {
+      prod: process.env.PROD_BASE_URL || '',
+      test: process.env.TWO_TEST_BASE_URL || '',
+      qa: process.env.QA_BASE_URL || '',
+      staging: process.env.SMOKE_BASE_URL || ''
+    };
+    let env = options.env;
+    if (!env) {
+      const response = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'env',
+          message: 'Select the environment:',
+          choices: [
+            { name: `prod (${ENV_URLS.prod})`, value: 'prod' },
+            { name: `test (${ENV_URLS.test})`, value: 'test' },
+            { name: `qa (${ENV_URLS.qa})`, value: 'qa' },
+            { name: `staging (${ENV_URLS.staging})`, value: 'staging' }
+          ],
+          default: 'test',
+        },
+      ]);
+      env = response.env;
+      options.env = env;
+    }
+    let playwrightLocation = process.env.PLAYWRIGHT_LOCATION;
+    if (!playwrightLocation) {
+      console.log(chalk.yellow('[INFO] PLAYWRIGHT_LOCATION is not set in your .env file.'));
+      const { setLocation } = await inquirer.prompt([
+        {
+          type: 'confirm',
+          name: 'setLocation',
+          message: 'Would you like to set PLAYWRIGHT_LOCATION now?',
+          default: true
+        }
+      ]);
+      if (setLocation) {
+        const { locationPath } = await inquirer.prompt([
+          {
+            type: 'input',
+            name: 'locationPath',
+            message: 'Enter the path where Playwright tests should be saved (e.g., playwright/public):',
+            validate: (input: string) => input ? true : 'Path required.'
+          }
+        ]);
+        const fs = await import('fs');
+        let envContent = '';
+        try {
+          envContent = fs.existsSync('.env') ? fs.readFileSync('.env', 'utf8') : '';
+        } catch { /* ignore error */ }
+        if (!envContent.includes('PLAYWRIGHT_LOCATION')) {
+          envContent += (envContent.endsWith('\n') ? '' : '\n') + `PLAYWRIGHT_LOCATION=${locationPath}\n`;
+        } else {
+          envContent = envContent.replace(/PLAYWRIGHT_LOCATION=.*/g, `PLAYWRIGHT_LOCATION=${locationPath}`);
+        }
+        fs.writeFileSync('.env', envContent, 'utf8');
+        console.log(chalk.green(`[INFO] .env updated with PLAYWRIGHT_LOCATION=${locationPath}`));
+        playwrightLocation = locationPath;
+      } else {
+        console.log(chalk.red('[ERROR] Please set PLAYWRIGHT_LOCATION in your .env file and rerun the command.'));
+        process.exit(1);
+      }
+    }
+    let testName = options.testName || options.name;
+    if (!testName) {
+      const response = await inquirer.prompt([
+        {
+          type: 'input',
+          name: 'testName',
+          message: `Enter Playwright test name (will be saved to ${playwrightLocation}/<name>.test.ts):`,
+          validate: (input: string) => input ? true : 'Test name required.'
+        }
+      ]);
+      testName = response.testName;
+      options.testName = testName;
+    }
+    await handleRecordCommand({ ...options, env, testName, playwrightLocation });
   });
 
 program
@@ -156,6 +239,7 @@ program
   });
 
 async function handleRecordCommand(options: RecordOptions = {}) {
+  // NO PROMPTS HERE, just use options
   logInfo('INSTRUCTIONS:');
   logInfo('1. You will select the environment and specify the file location for your Playwright test.');
   logInfo('2. A browser window will open to the selected environment URL.');
@@ -165,88 +249,18 @@ async function handleRecordCommand(options: RecordOptions = {}) {
   logInfo('6. To run your new test, use: npx playwright test <path-to-your-test-file>');
   logInfo('');
 
-  // Load environment URLs from .env or knowledge base
-  const ENV_URLS = {
-    prod: process.env.PROD_BASE_URL || '',
-    test: process.env.TWO_TEST_BASE_URL || '',
-    qa: process.env.QA_BASE_URL || '',
-    staging: process.env.SMOKE_BASE_URL || ''
-  };
-
-  let env = options.env;
-  if (!env) {
-    const response = await inquirer.prompt([
-      {
-        type: 'list',
-        name: 'env',
-        message: 'Select the environment:',
-        choices: [
-          { name: `prod (${ENV_URLS.prod})`, value: 'prod' },
-          { name: `test (${ENV_URLS.test})`, value: 'test' },
-          { name: `qa (${ENV_URLS.qa})`, value: 'qa' },
-          { name: `staging (${ENV_URLS.staging})`, value: 'staging' }
-        ],
-        default: 'test',
-      },
-    ]);
-    env = response.env;
+  // Use environment value passed in
+  const envKey = String(options.env);
+  let url = '';
+  switch (envKey) {
+    case 'prod': url = process.env.PROD_BASE_URL || ''; break;
+    case 'test': url = process.env.TWO_TEST_BASE_URL || ''; break;
+    case 'qa': url = process.env.QA_BASE_URL || ''; break;
+    case 'staging': url = process.env.SMOKE_BASE_URL || ''; break;
+    default: url = '';
   }
-  const envKey = String(env) as keyof typeof ENV_URLS;
-  const url = ENV_URLS[envKey];
-
-  // PLAYWRIGHT_LOCATION check
-  let playwrightLocation = process.env.PLAYWRIGHT_LOCATION;
-  if (!playwrightLocation) {
-    console.log(chalk.yellow('[INFO] PLAYWRIGHT_LOCATION is not set in your .env file.'));
-    const { setLocation } = await inquirer.prompt([
-      {
-        type: 'confirm',
-        name: 'setLocation',
-        message: 'Would you like to set PLAYWRIGHT_LOCATION now?',
-        default: true
-      }
-    ]);
-    if (setLocation) {
-      const { locationPath } = await inquirer.prompt([
-        {
-          type: 'input',
-          name: 'locationPath',
-          message: 'Enter the path where Playwright tests should be saved (e.g., playwright/public):',
-          validate: (input: string) => input ? true : 'Path required.'
-        }
-      ]);
-      // Update .env file
-      const fs = await import('fs');
-      let envContent = '';
-      try {
-        envContent = fs.existsSync('.env') ? fs.readFileSync('.env', 'utf8') : '';
-      } catch { /* ignore error */ }
-      if (!envContent.includes('PLAYWRIGHT_LOCATION')) {
-        envContent += (envContent.endsWith('\n') ? '' : '\n') + `PLAYWRIGHT_LOCATION=${locationPath}\n`;
-      } else {
-        envContent = envContent.replace(/PLAYWRIGHT_LOCATION=.*/g, `PLAYWRIGHT_LOCATION=${locationPath}`);
-      }
-      fs.writeFileSync('.env', envContent, 'utf8');
-      console.log(chalk.green(`[INFO] .env updated with PLAYWRIGHT_LOCATION=${locationPath}`));
-      playwrightLocation = locationPath;
-    } else {
-      console.log(chalk.red('[ERROR] Please set PLAYWRIGHT_LOCATION in your .env file and rerun the command.'));
-      process.exit(1);
-    }
-  }
-
-  let testName = options.testName || options.name;
-  if (!testName) {
-    const response = await inquirer.prompt([
-      {
-        type: 'input',
-        name: 'testName',
-        message: `Enter Playwright test name (will be saved to ${playwrightLocation}/<name>.test.ts):`,
-        validate: (input: string) => input ? true : 'Test name required.'
-      }
-    ]);
-    testName = response.testName;
-  }
+  const playwrightLocation = options.playwrightLocation || process.env.PLAYWRIGHT_LOCATION;
+  const testName = options.testName || options.name;
   const absPath = `${playwrightLocation}/${testName}.test.ts`;
 
   // Launch Playwright in record mode
@@ -291,6 +305,7 @@ interface GenerateOptions {
 interface RecordOptions extends GenerateOptions {
   name?: string;
   testName?: string;
+  playwrightLocation?: string;
 }
 
 // Utility to extract first valid user from test-users.md

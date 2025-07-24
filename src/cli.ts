@@ -48,7 +48,9 @@ program
   .option('--interactive', 'Enable dev intervention for each test step', false)
   .option('--debug', 'Enable debug/info logging', false)
   .action(async (options) => {
-    if (!options.debug && !process.argv.includes('--debug')) {
+    // Only prompt for debug mode if running in a TTY and not with --version or --help
+    const isInteractive = process.stdout.isTTY && !process.argv.includes('--version') && !process.argv.includes('--help');
+    if (isInteractive && !options.debug && !process.argv.includes('--debug')) {
       const { enableDebug } = await inquirer.prompt([
         {
           type: 'confirm',
@@ -137,7 +139,9 @@ program
   .option('-o, --output <path>', 'Test file path')
   .option('--debug', 'Enable debug/info logging', false)
   .action(async (options: RecordOptions) => {
-    if (!options.debug && !process.argv.includes('--debug')) {
+    // Only prompt for debug mode if running in a TTY and not with --version or --help
+    const isInteractive = process.stdout.isTTY && !process.argv.includes('--version') && !process.argv.includes('--help');
+    if (isInteractive && !options.debug && !process.argv.includes('--debug')) {
       const { enableDebug } = await inquirer.prompt([
         {
           type: 'confirm',
@@ -549,3 +553,5 @@ function logTestSummary(result: GeneratedTest & { content: string, ragContexts?:
     console.log(chalk.blue(`🧠 Confidence: ${Math.round(result.confidence * 100)}%`));
   }
 }
+
+program.parse(process.argv);

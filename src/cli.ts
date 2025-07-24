@@ -47,6 +47,7 @@ program
   .option('--no-page-objects', 'Generate without page object pattern', false)
   .option('--interactive', 'Enable dev intervention for each test step', false)
   .action(async (options) => {
+    // Prompt for missing values ONLY here
     if (!options.ticket) {
       const { ticket } = await inquirer.prompt([
         {
@@ -58,8 +59,31 @@ program
       ]);
       options.ticket = ticket;
     }
+    if (!options.env) {
+      const { env } = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'env',
+          message: 'Select target environment:',
+          choices: ['test', 'qa', 'staging', 'prod'],
+          default: 'test'
+        }
+      ]);
+      options.env = env;
+    }
+    if (!options.output) {
+      const { output } = await inquirer.prompt([
+        {
+          type: 'input',
+          name: 'output',
+          message: 'Enter output file path:',
+          default: `tests/e2e/${options.ticket.toLowerCase()}.spec.ts`
+        }
+      ]);
+      options.output = output;
+    }
     try {
-      const config = await buildTestConfig(options);
+      const config = await buildTestConfig(options); // buildTestConfig should NOT prompt for anything
       await generateTest(config, options.interactive);
     } catch (error) {
       logger.error('Failed to generate test:', error);
@@ -272,94 +296,17 @@ interface RecordOptions extends GenerateOptions {
 // Utility to extract first valid user from test-users.md
 async function buildTestConfig(options: GenerateOptions): Promise<TestConfig> {
   try {
-    const questions = [];
-    // Only prompt for ticket if not set
-    // if (!options.ticket) {
-    //   questions.push({
-    //     type: 'input',
-    //     name: 'ticket',
-    //     message: 'Enter Jira ticket key:',
-    //     validate: (input: string) => {
-    //       if (!input.match(/^[A-Z]+-\d+$/)) {
-    //         return 'Please enter a valid Jira ticket key (e.g., PROJ-123)';
-    //       }
-    //       return true;
-    //     }
-    //   });
-    // }
-    // Remove environment prompt here, always use options.env
-    let playwrightLocation = process.env.PLAYWRIGHT_LOCATION;
-    if (!playwrightLocation) {
-      console.log(chalk.yellow('[INFO] PLAYWRIGHT_LOCATION is not set in your .env file.'));
-      const { setLocation } = await inquirer.prompt([
-        {
-          type: 'confirm',
-          name: 'setLocation',
-          message: 'Would you like to set PLAYWRIGHT_LOCATION now?',
-          default: true
-        }
-      ]);
-      if (setLocation) {
-        const { locationPath } = await inquirer.prompt([
-          {
-            type: 'input',
-            name: 'locationPath',
-            message: 'Enter the path where Playwright tests should be saved (e.g., playwright/public):',
-            validate: (input: string) => input ? true : 'Path required.'
-          }
-        ]);
-        // Update .env file
-        const fs = await import('fs');
-        const envPath = '.env';
-        let envContent = '';
-        try {
-          envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
-        } catch {}
-        if (!envContent.includes('PLAYWRIGHT_LOCATION')) {
-          envContent += (envContent.endsWith('\n') ? '' : '\n') + `PLAYWRIGHT_LOCATION=${locationPath}\n`;
-        } else {
-          envContent = envContent.replace(/PLAYWRIGHT_LOCATION=.*/g, `PLAYWRIGHT_LOCATION=${locationPath}`);
-        }
-        fs.writeFileSync(envPath, envContent, 'utf8');
-        console.log(chalk.green(`[INFO] .env updated with PLAYWRIGHT_LOCATION=${locationPath}`));
-        playwrightLocation = locationPath;
-        // Reload env
-        dotenvConfig();
-      } else {
-        console.log(chalk.red('[ERROR] Please set PLAYWRIGHT_LOCATION in your .env file and rerun the command.'));
-        process.exit(1);
-      }
-    }
-    let outputPath;
-    if (playwrightLocation) {
-      questions.push({
-        type: 'input',
-        name: 'testName',
-        message: `Enter Playwright test name (will be saved to ${playwrightLocation}/<name>.test.ts):`,
-        validate: (input: string) => input ? true : 'Test name required.'
-      });
-    }
-    questions.push({
-      type: 'confirm',
-      name: 'overwrite',
-      message: 'Overwrite existing test file if it exists?',
-      default: !!options.overwrite
-    });
-    const answers = questions.length > 0 ? await inquirer.prompt(questions) : {};
-    outputPath = `${playwrightLocation}/${answers.testName}.test.ts`;
-    if (outputPath && !outputPath.endsWith('.test.ts')) {
-      outputPath = outputPath + '.test.ts';
-    }
+    // NO PROMPTS HERE, just use options
     const spinner = ora('Building configuration...').start();
     const jiraClient = new JiraClient();
-    const ticket = await jiraClient.getTicket(options.ticket || answers.ticket);
+    const ticket = await jiraClient.getTicket(options.ticket as string);
     const config: TestConfig = {
       ticket,
       environment: options.env as Environment,
-      outputPath,
-      overwrite: answers.overwrite ?? options.overwrite,
-      dryRun: false,
-      pageObjectPattern: false
+      outputPath: options.output as string,
+      overwrite: options.overwrite,
+      dryRun: options.dryRun,
+      pageObjectPattern: options.noPageObjects !== true
     };
     spinner.succeed('Configuration built successfully');
     return validateConfig(config);

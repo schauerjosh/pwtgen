@@ -21,6 +21,23 @@ export class TestGenerator {
     this.formatter = new CodeFormatter();
   }
 
+  /**
+   * Optimize and clean up the final merged test code using OpenAI before saving.
+   */
+  private async optimizeFinalCodeWithOpenAI(code: string): Promise<string> {
+    const prompt = `Optimize and clean up the following Playwright test code. Ensure it is production-ready, error-free, and follows best practices. Return ONLY TypeScript code, no markdown or explanations.\n\n${code}`;
+    const optimized = await this.openaiService.generateCode(prompt);
+    return this.formatter.format(optimized);
+  }
+
+  /**
+   * Utility to determine if login should be prepended based on Jira card content.
+   */
+  private shouldPrependLogin(config: TestConfig): boolean {
+    const text = `${config.ticket.summary} ${config.ticket.description} ${(config.ticket.acceptanceCriteria || []).join(' ')}`.toLowerCase();
+    return /log in as|ghost in as/.test(text);
+  }
+
   async generate(config: TestConfig): Promise<GeneratedTest & { content: string }> {
     logger.info(`Generating test for ticket: ${config.ticket.key}`);
 
@@ -44,9 +61,42 @@ export class TestGenerator {
       logger.info('Appended best-practices context for login/error test');
     }
 
-    const generatedCode = await this.generateTestCode(config, ragContexts);
-    const formattedCode = await this.formatter.format(generatedCode);
-    const confidence = this.calculateConfidence(ragContexts, generatedCode);
+    let generatedCode = await this.generateTestCode(config, ragContexts);
+
+    // Only prepend login if Jira card says so
+    if (this.shouldPrependLogin(config)) {
+      const baseUrl = getBaseUrl(config.environment);
+      // Use credentials from config, env, or test-users
+      let email = process.env.TEST_EMAIL || '';
+      let password = process.env.TEST_PASSWORD || '';
+      if (config.vCreativeCredentials && config.vCreativeCredentials.email && config.vCreativeCredentials.password) {
+        email = config.vCreativeCredentials.email;
+        password = config.vCreativeCredentials.password;
+      }
+      if (!email || !password) {
+        // fallback: get from test-users
+        try {
+          const fs = await import('fs/promises');
+          const userFile = 'knowledge-base/fixtures/test-users.md';
+          const file = await fs.readFile(userFile, 'utf8');
+          const match = file.match(/export const validUsers = (\[[\s\S]*?\]);/);
+          if (match) {
+            const validUsers = eval(match[1]);
+            email = validUsers[0].email;
+            password = validUsers[0].password;
+          }
+        } catch { /* ignore error */ }
+      }
+      const loginSteps = `await page.goto('${baseUrl}/login');\nawait page.getByRole('textbox', { name: 'Email' }).fill('${email}');\nawait page.getByRole('textbox', { name: 'Password' }).fill('${password}');\nawait page.getByRole('button', { name: /login/i }).click();\nawait expect(page).toHaveURL(/dashboard|home|main/i);`;
+      // Prepend login steps to the first test.beforeEach or first test block
+      generatedCode = generatedCode.replace(/(test\.beforeEach\s*\(\s*async\s*\(\{\s*page\s*\}\s*\)\s*=>\s*{)/,
+        `$1\n    ${loginSteps}\n`);
+    }
+
+    // Final OpenAI optimization and cleanup
+    const optimizedCode = await this.optimizeFinalCodeWithOpenAI(generatedCode);
+    const formattedCode = await this.formatter.format(optimizedCode);
+    const confidence = this.calculateConfidence(ragContexts, formattedCode);
 
     let finalPath = config.outputPath;
     if (!config.dryRun) {

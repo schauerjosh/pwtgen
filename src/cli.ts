@@ -153,99 +153,57 @@ async function handleRecordCommand() {
   const envKey = String(env) as keyof typeof ENV_URLS;
   const url = ENV_URLS[envKey];
 
-  // Prompt for login credentials (integrate with KB if available)
-  let loginCredentials = undefined;
-  const { wantsLogin } = await inquirer.prompt([
-    {
-      type: 'confirm',
-      name: 'wantsLogin',
-      message: 'Do you want to provide login credentials (email/password)?',
-      default: false,
-    },
-  ]);
-  if (wantsLogin) {
-    loginCredentials = await inquirer.prompt([
+  // PLAYWRIGHT_LOCATION check
+  let playwrightLocation = process.env.PLAYWRIGHT_LOCATION;
+  if (!playwrightLocation) {
+    console.log(chalk.yellow('[INFO] PLAYWRIGHT_LOCATION is not set in your .env file.'));
+    const { setLocation } = await inquirer.prompt([
       {
-        type: 'input',
-        name: 'email',
-        message: 'Enter user email:',
-      },
-      {
-        type: 'input',
-        name: 'password',
-        message: 'Enter user password:',
-      },
+        type: 'confirm',
+        name: 'setLocation',
+        message: 'Would you like to set PLAYWRIGHT_LOCATION now?',
+        default: true
+      }
     ]);
-    // Save credentials as fixture
-    const fs = await import('fs');
-    const usersDir = 'playwright/fixtures/users';
-    fs.mkdirSync(usersDir, { recursive: true });
-    const usersFile = 'playwright/fixtures/users/users.json';
-    let users = [];
-    if (fs.existsSync(usersFile)) {
+    if (setLocation) {
+      const { locationPath } = await inquirer.prompt([
+        {
+          type: 'input',
+          name: 'locationPath',
+          message: 'Enter the path where Playwright tests should be saved (e.g., playwright/public):',
+          validate: (input: string) => input ? true : 'Path required.'
+        }
+      ]);
+      // Update .env file
+      const fs = await import('fs');
+      let envContent = '';
       try {
-        users = JSON.parse(fs.readFileSync(usersFile, 'utf8'));
+        envContent = fs.existsSync('.env') ? fs.readFileSync('.env', 'utf8') : '';
       } catch { /* ignore error */ }
+      if (!envContent.includes('PLAYWRIGHT_LOCATION')) {
+        envContent += (envContent.endsWith('\n') ? '' : '\n') + `PLAYWRIGHT_LOCATION=${locationPath}\n`;
+      } else {
+        envContent = envContent.replace(/PLAYWRIGHT_LOCATION=.*/g, `PLAYWRIGHT_LOCATION=${locationPath}`);
+      }
+      fs.writeFileSync('.env', envContent, 'utf8');
+      console.log(chalk.green(`[INFO] .env updated with PLAYWRIGHT_LOCATION=${locationPath}`));
+      playwrightLocation = locationPath;
+    } else {
+      console.log(chalk.red('[ERROR] Please set PLAYWRIGHT_LOCATION in your .env file and rerun the command.'));
+      process.exit(1);
     }
-    users.push(loginCredentials);
-    fs.writeFileSync(usersFile, JSON.stringify(users, null, 2), 'utf8');
-    logInfo(`\n✅ Credentials saved to ${usersFile}`);
   }
 
-  // Prompt for spot data or mock files (integrate with KB if available)
-  const { wantsSpotData } = await inquirer.prompt([
-    {
-      type: 'list',
-      name: 'wantsSpotData',
-      message: 'Do you want to provide specific spot data or use mock files?',
-      choices: [
-        { name: 'Provide specific spot data', value: 'specific' },
-        { name: 'Use mock files', value: 'mock' },
-        { name: 'No spot data needed', value: 'none' },
-      ],
-      default: 'none',
-    },
-  ]);
-  if (wantsSpotData === 'specific') {
-    const spotDetails = await inquirer.prompt([
-      { type: 'input', name: 'user', message: 'Which user? (email address)' },
-      { type: 'input', name: 'adtype', message: 'Which adtype?' },
-      { type: 'input', name: 'stations', message: 'Which stations?' },
-      { type: 'input', name: 'spotTitle', message: 'Spot title?' },
-      { type: 'input', name: 'startDate', message: 'Start date?' },
-      { type: 'input', name: 'endDate', message: 'End date?' },
-      { type: 'input', name: 'dueDate', message: 'Due date?' },
-      { type: 'input', name: 'status', message: 'Status?' },
-    ]);
-    const fs = await import('fs');
-    const spotsDir = 'playwright/fixtures/spots';
-    fs.mkdirSync(spotsDir, { recursive: true });
-    const spotsFile = 'playwright/fixtures/spots/spots.json';
-    let spots = [];
-    if (fs.existsSync(spotsFile)) {
-      try {
-        spots = JSON.parse(fs.readFileSync(spotsFile, 'utf8'));
-      } catch { /* ignore error */ }
-    }
-    spots.push(spotDetails);
-    fs.writeFileSync(spotsFile, JSON.stringify(spots, null, 2), 'utf8');
-    logInfo(`\n✅ Spot data saved to ${spotsFile}`);
-  } else if (wantsSpotData === 'mock') {
-    logInfo('\nUsing mock spot data files.');
-    // Optionally copy or reference mock files here
-  }
-
-  // Prompt for test file path and write mode
-  const { testFilePath } = await inquirer.prompt([
+  // Prompt for test name only
+  const { testName } = await inquirer.prompt([
     {
       type: 'input',
-      name: 'testFilePath',
-      message: 'Enter the test file path:',
-      validate: input => input ? true : 'Test file path required.'
+      name: 'testName',
+      message: `Enter Playwright test name (will be saved to ${playwrightLocation}/<name>.test.ts):`,
+      validate: (input: string) => input ? true : 'Test name required.'
     }
   ]);
-  const pathModule = await import('path');
-  const absPath = pathModule.resolve(testFilePath);
+  const absPath = `${playwrightLocation}/${testName}.test.ts`;
 
   // Launch Playwright in record mode
   const { execSync } = await import('child_process');
@@ -287,36 +245,6 @@ interface GenerateOptions {
 }
 
 // Utility to extract first valid user from test-users.md
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-async function getDefaultTestUser() {
-  const fs = await import('fs/promises');
-  // Resolve path relative to project root, regardless of src or dist
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = dirname(__filename);
-  // Try both possible locations
-  let userFile;
-  try {
-    userFile = join(__dirname, '../knowledge-base/fixtures/test-users.md');
-    return await tryParseUserFile(userFile, fs);
-  } catch { /* ignore error, try next path */ }
-  try {
-    userFile = join(__dirname, '../../knowledge-base/fixtures/test-users.md');
-    return await tryParseUserFile(userFile, fs);
-  } catch { /* ignore error, fallback to default */ }
-  return { email: 'testuser@example.com', password: 'password' };
-}
-import type { promises as FsPromisesType } from 'fs';
-async function tryParseUserFile(userFile: string, fs: typeof FsPromisesType): Promise<{ email: string; password: string }> {
-  const file = await fs.readFile(userFile, 'utf8');
-  const match = file.match(/export const validUsers = (\[[\s\S]*?\]);/);
-  if (match) {
-    const validUsers = eval(match[1]);
-    return validUsers[0];
-  }
-  throw new Error('No valid users found');
-}
-
 async function buildTestConfig(options: GenerateOptions): Promise<TestConfig> {
   try {
     const questions = [];
@@ -431,7 +359,6 @@ async function generateTest(config: TestConfig, interactive = false): Promise<vo
     const generator = new TestGenerator();
     let interventionIndex = null;
     let interventionCode = '';
-    let manualSteps = '';
     let steps: string[] = [];
     if (interactive) {
       // Dev intervention loop
@@ -526,7 +453,7 @@ async function generateTest(config: TestConfig, interactive = false): Promise<vo
           logInfo(`\n✅ Manual actions recorded and saved to ${codegenPath}`);
           // Read manual steps
           const fs = await import('fs/promises');
-          manualSteps = await fs.readFile(codegenPath, 'utf8');
+          await fs.readFile(codegenPath, 'utf8');
         } catch (err) {
           console.error('Error recording manual actions:', err);
           // Offer to retry or skip
@@ -552,80 +479,16 @@ async function generateTest(config: TestConfig, interactive = false): Promise<vo
       const aiSteps = await generator['generateTestCode'](config, ragContexts);
       steps = aiSteps.split(/(?=await test\.step)/g);
     }
-    // Merge AI/dev steps and manual steps into a single, robust pipeline
-    const filteredSteps = steps.filter(Boolean).map((step) => {
-      if (/^import\s+\{\s*expect,?\s*test\s*\}/.test(step)) return '';
-      if (/^test\.describe\(/.test(step)) return '';
-      if (/^test\('/.test(step)) return '';
-      if (/^test\.afterEach\(/.test(step)) return '';
-      if (/^test\.beforeEach\(/.test(step)) return '';
-      return step;
-    }).filter(Boolean);
     // Get the base URL for the selected environment
     const { TestGeneratorUtils } = await import('./core/TestGenerator.js');
-    const baseUrl = TestGeneratorUtils.getBaseUrl(config.environment);
-    // Use credentials from vCreativeCredentials, .env, or test-users.md
-    let email, password;
-    if (config.vCreativeCredentials && config.vCreativeCredentials.email && config.vCreativeCredentials.password) {
-      email = config.vCreativeCredentials.email;
-      password = config.vCreativeCredentials.password;
-    } else if (process.env.TEST_EMAIL && process.env.TEST_PASSWORD) {
-      email = process.env.TEST_EMAIL;
-      password = process.env.TEST_PASSWORD;
-    } else {
-      const user = await getDefaultTestUser();
-      email = user.email;
-      password = user.password;
-    }
-    // Generate login steps
-    const loginSteps = `\n    await page.goto('${baseUrl}/login');\n    await page.getByRole('textbox', { name: 'Email' }).fill('${email}');\n    await page.getByRole('textbox', { name: 'Password' }).fill('${password}');\n    await page.getByRole('button', { name: /login/i }).click();\n    await expect(page).toHaveURL(/dashboard|home|main/i); // Adjust as needed\n    `;
-    const mergedSteps = filteredSteps.join('\n\n');
-    let mergedCode = 'import { expect, test } from "@playwright/test";\n\n';
-    mergedCode += 'test.describe(\'Calendar View Functionality\', () => {\n';
-    mergedCode += '  test.beforeEach(async ({ page }) => {\n' + loginSteps + '  });\n\n';
-    mergedCode += '  test(\'Verify Calendar View and Functionality\', async ({ page }) => {\n';
-    mergedCode += mergedSteps.split('\n').map(line => '    ' + line).join('\n') + '\n';
-    mergedCode += '  });\n\n';
-    mergedCode += '  test.afterEach(async ({ page }, testInfo) => {\n';
-    mergedCode += '    if (testInfo.status !== testInfo.expectedStatus) {\n';
-    mergedCode += '      await page.screenshot({ path: `screenshots/' + '${testInfo.title}' + '.png`, fullPage: true });\n';
-    mergedCode += '    }\n';
-    mergedCode += '  });\n';
-    mergedCode += '});\n';
-    // Remove duplicate Playwright imports
-    mergedCode = mergedCode.replace(/(import\s+\{\s*expect,?\s*test\s*\}\s+from\s+'@playwright\/test';?\s*)+/g, 'import { expect, test } from "@playwright/test";\n');
-    // When merging manual steps, robustly strip all imports and all Playwright block statements (test, test.describe, test.beforeEach, test.afterEach, etc.) from manual/dev intervention code before merging. Only keep the step/action code. Update merging logic to handle all edge cases and prevent nested blocks.
-    if (manualSteps) {
-      // Remove all import statements (anywhere in the code, not just at the start of lines)
-      let cleaned = manualSteps.replace(/import\s+\{?[^\n;]*\}?\s+from\s+['"][^'"]+['"];?/g, '').replace(/^import[^\n]*\n?/gm, '').trim();
-      // Remove all test.describe, test.beforeEach, test.afterEach, and similar Playwright block statements (including their bodies)
-      const blockPatterns = [
-        /test\s*\.\s*describe\s*\([^)]*\)\s*{[\s\S]*?^\s*}\s*$/gm,
-        /test\s*\.\s*beforeEach\s*\([^)]*\)\s*{[\s\S]*?^\s*}\s*$/gm,
-        /test\s*\.\s*afterEach\s*\([^)]*\)\s*{[\s\S]*?^\s*}\s*$/gm,
-        /test\s*\([^)]*\)\s*{[\s\S]*?^\s*}\s*$/gm
-      ];
-      for (const pattern of blockPatterns) {
-        cleaned = cleaned.replace(pattern, '');
-      }
-      // Remove any remaining describe(...) blocks (non-Playwright)
-      cleaned = cleaned.replace(/describe\s*\([^)]*\)\s*{[\s\S]*?^\s*}\s*$/gm, '');
-      // Remove any remaining beforeEach/afterEach blocks (non-Playwright)
-      cleaned = cleaned.replace(/beforeEach\s*\([^)]*\)\s*{[\s\S]*?^\s*}\s*$/gm, '');
-      cleaned = cleaned.replace(/afterEach\s*\([^)]*\)\s*{[\s\S]*?^\s*}\s*$/gm, '');
-      // Remove any leftover empty lines
-      cleaned = cleaned.replace(/^[ \t]*\n/gm, '');
-      cleaned = cleaned.trim();
-      // If nothing left, fallback to original manualSteps
-      if (!cleaned) cleaned = manualSteps;
-      // Indent and annotate
-      if (!mergedCode.includes(cleaned.substring(0, 40))) {
-        mergedCode += '\n\n// Manual steps recorded (dev intervention):\n' + cleaned.split('\n').map(line => '    ' + line).join('\n');
-      }
-    }
+    // Remove unused baseUrl, email, password variables
+
+    // Remove loginSteps variable and any code that references it
+    // Instead, just call generator.generate(config) and use the returned code
+    const result = await generator.generate(config);
+    const mergedCode = result.content;
     // Write final merged code to output path
     const fs = await import('fs/promises');
-    // Fix for Windows EISDIR error: if outputPath is a directory, rename it to .bak_<timestamp> and proceed
     try {
       const stats = await fs.stat(config.outputPath);
       if (stats.isDirectory()) {

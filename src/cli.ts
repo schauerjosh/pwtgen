@@ -80,8 +80,10 @@ program
 program
   .command('record')
   .description('Launch a browser and record Playwright actions to generate a test (JIRA integration included)')
-  .action(async () => {
-    await handleRecordCommand();
+  .option('-e, --env <environment>', 'Target environment')
+  .option('-n, --name <testName>', 'Test name')
+  .action(async (options: RecordOptions) => {
+    await handleRecordCommand(options);
   });
 
 program
@@ -118,7 +120,7 @@ program
     await generateTest(config, true);
   });
 
-async function handleRecordCommand(options: Partial<GenerateOptions> = {}) {
+async function handleRecordCommand(options: RecordOptions = {}) {
   logInfo('INSTRUCTIONS:');
   logInfo('1. You will select the environment and specify the file location for your Playwright test.');
   logInfo('2. A browser window will open to the selected environment URL.');
@@ -198,15 +200,18 @@ async function handleRecordCommand(options: Partial<GenerateOptions> = {}) {
     }
   }
 
-  // Prompt for test name only
-  const { testName } = await inquirer.prompt([
-    {
-      type: 'input',
-      name: 'testName',
-      message: `Enter Playwright test name (will be saved to ${playwrightLocation}/<name>.test.ts):`,
-      validate: (input: string) => input ? true : 'Test name required.'
-    }
-  ]);
+  let testName = options.testName || options.name;
+  if (!testName) {
+    const response = await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'testName',
+        message: `Enter Playwright test name (will be saved to ${playwrightLocation}/<name>.test.ts):`,
+        validate: (input: string) => input ? true : 'Test name required.'
+      }
+    ]);
+    testName = response.testName;
+  }
   const absPath = `${playwrightLocation}/${testName}.test.ts`;
 
   // Launch Playwright in record mode
@@ -246,6 +251,11 @@ interface GenerateOptions {
   dryRun?: boolean;
   noPageObjects?: boolean;
   interactive?: boolean;
+}
+
+interface RecordOptions extends GenerateOptions {
+  name?: string;
+  testName?: string;
 }
 
 // Utility to extract first valid user from test-users.md

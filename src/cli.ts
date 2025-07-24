@@ -143,7 +143,7 @@ program
         {
           type: 'list',
           name: 'env',
-          message: 'Select the environment:',
+          message: 'Select [debug] the environment:',
           choices: ['test', 'prod', 'qa', 'staging'],
           default: 'test',
         }

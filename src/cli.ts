@@ -46,7 +46,24 @@ program
   .option('--dry-run', 'Generate test without writing to file', false)
   .option('--no-page-objects', 'Generate without page object pattern', false)
   .option('--interactive', 'Enable dev intervention for each test step', false)
+  .option('--debug', 'Enable debug/info logging', false)
   .action(async (options) => {
+    if (!options.debug && !process.argv.includes('--debug')) {
+      const { enableDebug } = await inquirer.prompt([
+        {
+          type: 'confirm',
+          name: 'enableDebug',
+          message: 'Enable debug/info logging?',
+          default: false
+        }
+      ]);
+      if (enableDebug) {
+        options.debug = true;
+        debugMode = true;
+      }
+    } else if (options.debug) {
+      debugMode = true;
+    }
     // Prompt for missing values ONLY here
     if (!options.ticket) {
       const { ticket } = await inquirer.prompt([
@@ -118,7 +135,24 @@ program
   .option('-e, --env <environment>', 'Target environment')
   .option('-n, --name <testName>', 'Test name')
   .option('-o, --output <path>', 'Test file path')
+  .option('--debug', 'Enable debug/info logging', false)
   .action(async (options: RecordOptions) => {
+    if (!options.debug && !process.argv.includes('--debug')) {
+      const { enableDebug } = await inquirer.prompt([
+        {
+          type: 'confirm',
+          name: 'enableDebug',
+          message: 'Enable debug/info logging?',
+          default: false
+        }
+      ]);
+      if (enableDebug) {
+        options.debug = true;
+        debugMode = true;
+      }
+    } else if (options.debug) {
+      debugMode = true;
+    }
     // Prompt for missing values ONLY here
     const ENV_URLS = {
       prod: process.env.PROD_BASE_URL || '',
@@ -267,6 +301,7 @@ interface GenerateOptions {
   dryRun?: boolean;
   noPageObjects?: boolean;
   interactive?: boolean;
+  debug?: boolean;
 }
 
 interface RecordOptions extends GenerateOptions {
@@ -499,22 +534,6 @@ program
     const result = await sh.healTestFile(options.file);
     logInfo(chalk.green('🔧 Self-healing result:') + ' ' + JSON.stringify(result));
   });
-
-// Prompt for debug mode if not provided
-if (!process.argv.includes('--debug')) {
-  const { enableDebug } = await inquirer.prompt([
-    {
-      type: 'confirm',
-      name: 'enableDebug',
-      message: 'Enable debug/info logging?',
-      default: false
-    }
-  ]);
-  if (enableDebug) {
-    process.argv.push('--debug');
-    debugMode = true;
-  }
-}
 
 // Improved output for test generation
 function logTestSummary(result: GeneratedTest & { content: string, ragContexts?: RAGContext[], confidence?: number, testName?: string }, config: TestConfig) {

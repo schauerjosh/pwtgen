@@ -118,7 +118,7 @@ program
     await generateTest(config, true);
   });
 
-async function handleRecordCommand() {
+async function handleRecordCommand(options: Partial<GenerateOptions> = {}) {
   logInfo('INSTRUCTIONS:');
   logInfo('1. You will select the environment and specify the file location for your Playwright test.');
   logInfo('2. A browser window will open to the selected environment URL.');
@@ -136,20 +136,24 @@ async function handleRecordCommand() {
     staging: process.env.SMOKE_BASE_URL || ''
   };
 
-  const { env } = await inquirer.prompt([
-    {
-      type: 'list',
-      name: 'env',
-      message: 'Select the environment:',
-      choices: [
-        { name: `prod (${ENV_URLS.prod})`, value: 'prod' },
-        { name: `test (${ENV_URLS.test})`, value: 'test' },
-        { name: `qa (${ENV_URLS.qa})`, value: 'qa' },
-        { name: `staging (${ENV_URLS.staging})`, value: 'staging' }
-      ],
-      default: 'test',
-    },
-  ]);
+  let env = options.env;
+  if (!env) {
+    const response = await inquirer.prompt([
+      {
+        type: 'list',
+        name: 'env',
+        message: 'Select the environment:',
+        choices: [
+          { name: `prod (${ENV_URLS.prod})`, value: 'prod' },
+          { name: `test (${ENV_URLS.test})`, value: 'test' },
+          { name: `qa (${ENV_URLS.qa})`, value: 'qa' },
+          { name: `staging (${ENV_URLS.staging})`, value: 'staging' }
+        ],
+        default: 'test',
+      },
+    ]);
+    env = response.env;
+  }
   const envKey = String(env) as keyof typeof ENV_URLS;
   const url = ENV_URLS[envKey];
 

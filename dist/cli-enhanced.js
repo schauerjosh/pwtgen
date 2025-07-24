@@ -8,6 +8,7 @@ import { MCPService } from './core/MCPService.js';
 import { SelfHealingService } from './core/SelfHealingService.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import pkg from '../package.json' with { type: 'json' };
 // Load environment variables from .env
 config();
 const program = new Command();
@@ -20,7 +21,7 @@ const ENV_URLS = {
 program
     .name('pwtgen')
     .description('AI-Powered Playwright Test Generator CLI')
-    .version('2.0.0');
+    .version(pkg.version);
 program
     .command('generate')
     .alias('gen')
@@ -32,7 +33,7 @@ program
     .action(async (options) => {
     const spinner = ora('Building configuration...').start();
     try {
-        // Prompt for all args, even if provided
+        // Prompt for ticket and environment
         const answers = await inquirer.prompt([
             {
                 type: 'input',
@@ -47,28 +48,62 @@ program
                 message: 'Select target environment:',
                 choices: ['test', 'qa', 'staging', 'prod'],
                 default: options.env || 'test'
-            },
-            {
-                type: 'input',
-                name: 'output',
-                message: 'Enter output file path:',
-                default: options.output || ((answers) => `tests/e2e/${(options.ticket || answers.ticket).toLowerCase()}.spec.ts`)
-            },
-            {
-                type: 'confirm',
-                name: 'overwrite',
-                message: 'Overwrite existing test file if it exists?',
-                default: !!options.overwrite
             }
         ]);
         const ticket = answers.ticket;
         const env = answers.environment;
-        const output = answers.output;
-        const overwrite = answers.overwrite;
-        if (!ENV_URLS[env]) {
-            spinner.fail(`No URL configured for environment "${env}". Check your .env file.`);
-            process.exit(1);
+        let playwrightLocation = process.env.PLAYWRIGHT_LOCATION;
+        if (!playwrightLocation) {
+            console.log(chalk.yellow('[INFO] PLAYWRIGHT_LOCATION is not set in your .env file.'));
+            const { setLocation } = await inquirer.prompt([
+                {
+                    type: 'confirm',
+                    name: 'setLocation',
+                    message: 'Would you like to set PLAYWRIGHT_LOCATION now?',
+                    default: true
+                }
+            ]);
+            if (setLocation) {
+                const { locationPath } = await inquirer.prompt([
+                    {
+                        type: 'input',
+                        name: 'locationPath',
+                        message: 'Enter the path where Playwright tests should be saved (e.g., playwright/public):',
+                        validate: (input) => input ? true : 'Path required.'
+                    }
+                ]);
+                // Update .env file
+                let envContent = '';
+                try {
+                    envContent = fs.existsSync('.env') ? fs.readFileSync('.env', 'utf8') : '';
+                }
+                catch { /* ignore error */ }
+                if (!envContent.includes('PLAYWRIGHT_LOCATION')) {
+                    envContent += (envContent.endsWith('\n') ? '' : '\n') + `PLAYWRIGHT_LOCATION=${locationPath}\n`;
+                }
+                else {
+                    envContent = envContent.replace(/PLAYWRIGHT_LOCATION=.*/g, `PLAYWRIGHT_LOCATION=${locationPath}`);
+                }
+                fs.writeFileSync('.env', envContent, 'utf8');
+                console.log(chalk.green(`[INFO] .env updated with PLAYWRIGHT_LOCATION=${locationPath}`));
+                playwrightLocation = locationPath;
+            }
+            else {
+                console.log(chalk.red('[ERROR] Please set PLAYWRIGHT_LOCATION in your .env file and rerun the command.'));
+                process.exit(1);
+            }
         }
+        // Prompt for test name only
+        const { testName } = await inquirer.prompt([
+            {
+                type: 'input',
+                name: 'testName',
+                message: `Enter Playwright test name (will be saved to ${playwrightLocation}/<name>.test.ts):`,
+                validate: (input) => input ? true : 'Test name required.'
+            }
+        ]);
+        const output = `${playwrightLocation}/${testName}.test.ts`;
+        const overwrite = options.overwrite;
         if (fs.existsSync(output) && !overwrite) {
             spinner.fail(`File ${output} already exists. Use --overwrite to replace it.`);
             process.exit(1);
@@ -77,16 +112,15 @@ program
         const mcp = new MCPService();
         // Interactive dev intervention handler
         const onIntervention = async (step) => {
-            // If step 1, update the prompt to show the actual environment URL
             let promptEnvUrl = '';
             if (step.stepIndex === 0 && ENV_URLS[env]) {
                 promptEnvUrl = ENV_URLS[env];
             }
-            console.log(chalk.yellow(`\n🔄 Step ${step.stepIndex + 1}: ${step.description}`));
+            logInfo(chalk.yellow(`\n🔄 Step ${step.stepIndex + 1}: ${step.description}`));
             if (promptEnvUrl) {
-                console.log(chalk.magenta(`🌐 Environment URL: ${promptEnvUrl}`));
+                logInfo(chalk.magenta(`🌐 Environment URL: ${promptEnvUrl}`));
             }
-            console.log(chalk.cyan(`💡 Suggested code:\n${step.suggestedCode}`));
+            logInfo(chalk.cyan(`💡 Suggested code:\n${step.suggestedCode}`));
             const { action } = await inquirer.prompt([
                 {
                     type: 'list',
@@ -117,7 +151,7 @@ program
                 return '// Step skipped by developer';
             }
             else if (action === 'debug') {
-                console.log(chalk.magenta('🐛 Debug mode - test generation paused. Do your manual investigation now.'));
+                logInfo(chalk.magenta('🐛 Debug mode - test generation paused. Do your manual investigation now.'));
                 await inquirer.prompt([{ type: 'input', name: 'continue', message: 'Press ENTER to continue...' }]);
                 return step.suggestedCode;
             }
@@ -132,14 +166,14 @@ program
             fs.mkdirSync(outputDir, { recursive: true });
         }
         fs.writeFileSync(output, result.code, 'utf-8');
-        console.log(chalk.green(`\n✅ Test generated: ${output}`));
-        console.log(chalk.blue(`📋 Ticket: ${ticket}`));
-        console.log(chalk.blue(`🎯 Environment: ${env} (${ENV_URLS[env]})`));
-        console.log(chalk.blue(`📁 Output: ${output}`));
-        console.log(chalk.blue(`🧪 Test name: ${result.testName}`));
-        console.log(chalk.blue(`📊 Steps: ${result.steps.length}`));
+        logInfo(chalk.green(`\n✅ Test generated: ${output}`));
+        logInfo(chalk.blue(`📋 Ticket: ${ticket}`));
+        logInfo(chalk.blue(`🎯 Environment: ${env} (${ENV_URLS[env]})`));
+        logInfo(chalk.blue(`📁 Output: ${output}`));
+        logInfo(chalk.blue(`🧪 Test name: ${result.testName}`));
+        logInfo(chalk.blue(`📊 Steps: ${result.steps.length}`));
         result.steps.forEach((step, i) => {
-            console.log(chalk.gray(`   ${i + 1}. ${step}`));
+            logInfo(chalk.gray(`   ${i + 1}. ${step}`));
         });
     }
     catch (error) {
@@ -159,7 +193,17 @@ program
     }
     const sh = new SelfHealingService();
     const result = await sh.healTestFile(options.file);
-    console.log(chalk.green('🔧 Self-healing result:'), result);
+    logInfo(chalk.green('🔧 Self-healing result:') + ' ' + JSON.stringify(result));
 });
-program.parse();
+program
+    .option('--debug', 'Enable debug/info logging', false);
+program.parseAsync(process.argv).then(() => {
+    debugMode = program.opts().debug;
+});
+let debugMode = false;
+function logInfo(message) {
+    if (debugMode) {
+        console.log(chalk.blue('[INFO]'), message);
+    }
+}
 //# sourceMappingURL=cli-enhanced.js.map

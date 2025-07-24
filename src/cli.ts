@@ -96,10 +96,15 @@ program
           type: 'input',
           name: 'output',
           message: 'Enter output file path:',
-          default: `tests/e2e/${options.ticket.toLowerCase()}.spec.ts`
+          default: getValidTestFilePath(options.ticket ? options.ticket.toLowerCase() : 'playwright-test'),
+          validate: (input: string) => {
+            const validPath = getValidTestFilePath(input);
+            if (validPath.endsWith('.test.ts')) return true;
+            return 'Test file path must end with .test.ts';
+          }
         }
       ]);
-      options.output = output;
+      options.output = getValidTestFilePath(output);
     }
     try {
       const config = await buildTestConfig(options); // buildTestConfig should NOT prompt for anything
@@ -486,6 +491,16 @@ async function generateTest(config: TestConfig, interactive = false): Promise<vo
       if (typeof e === 'object' && e !== null && 'code' in e && (e as { code?: string }).code !== 'ENOENT') throw e;
       // ENOENT is fine (file doesn't exist yet)
     }
+    // Before writing, ensure output path is a file, not a directory
+    try {
+      const stats = await fs.stat(config.outputPath);
+      if (stats.isDirectory()) {
+        throw new Error(`Output path ${config.outputPath} is a directory. Please provide a valid file path ending with .spec.ts.`);
+      }
+    } catch (e) {
+      // ENOENT is fine (file doesn't exist yet)
+      if (e && typeof e === 'object' && 'code' in e && (e as { code?: string }).code !== 'ENOENT') throw e;
+    }
     await fs.mkdir(config.outputPath.replace(/\/[^/]+$/, ''), { recursive: true });
     await fs.writeFile(config.outputPath, mergedCode, 'utf8');
     spinner.succeed('Test generation complete');
@@ -552,6 +567,21 @@ function logTestSummary(result: GeneratedTest & { content: string, ragContexts?:
   if (result.confidence !== undefined) {
     console.log(chalk.blue(`🧠 Confidence: ${Math.round(result.confidence * 100)}%`));
   }
+}
+
+function getValidTestFilePath(input: string): string {
+  let name = input.trim();
+  // Remove any trailing slashes or directory indicators
+  name = name.replace(/\/+$/, '');
+  // Ensure .test.ts extension
+  if (!name.endsWith('.test.ts')) {
+    name += '.test.ts';
+  }
+  // Default to playwright/public if no path provided
+  if (!name.includes('/')) {
+    name = `playwright/public/${name}`;
+  }
+  return name;
 }
 
 program.parse(process.argv);

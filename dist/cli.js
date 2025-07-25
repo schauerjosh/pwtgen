@@ -19,6 +19,7 @@ import { logger } from './utils/logger.js';
 import pkg from '../package.json' with { type: 'json' };
 import path from 'path';
 import fs from 'fs';
+import { execSync, exec } from 'child_process';
 dotenvConfig();
 const program = new Command();
 program
@@ -256,6 +257,22 @@ async function handleRecordCommand(options = {}) {
     logInfo('5. Your actions will be automatically captured and saved as a Playwright test in the file you specify.');
     logInfo('6. To run your new test, use: npx playwright test <path-to-your-test-file>');
     logInfo('');
+    // Check Playwright install
+    try {
+        execSync('npx playwright --version', { stdio: 'ignore' });
+    }
+    catch {
+        console.error(chalk.red('Playwright is not installed. Run "npx playwright install" and try again.'));
+        process.exit(1);
+    }
+    // Ensure browsers are installed
+    try {
+        execSync('npx playwright install', { stdio: 'ignore' });
+    }
+    catch {
+        console.error(chalk.red('Failed to install Playwright browsers. Please check your environment.'));
+        process.exit(1);
+    }
     const ENV_URLS = {
         prod: process.env.PROD_BASE_URL || '',
         test: process.env.TWO_TEST_BASE_URL || '',
@@ -272,14 +289,39 @@ async function handleRecordCommand(options = {}) {
     if (!path.extname(absPath) || (fs.existsSync(absPath) && fs.lstatSync(absPath).isDirectory())) {
         absPath = path.join(absPath, 'recorded.test.ts');
     }
-    try {
-        logInfo(`\nLaunching Playwright in record mode for: ${url}\n`);
-        const { execSync } = await import('child_process');
-        execSync(`npx playwright codegen ${url} --output ${absPath}`, { stdio: 'inherit' });
-        logInfo(`\n✅ Test actions recorded and saved to ${absPath}`);
-    }
-    catch (err) {
-        console.error('Error:', err);
+    // User guidance
+    console.log(chalk.yellow('\n[IMPORTANT] Do NOT close the Playwright codegen browser window until you are finished recording and the CLI prompts you that recording is complete.'));
+    // Retry logic
+    let codegenSuccess = false;
+    let attempts = 0;
+    while (!codegenSuccess && attempts < 2) {
+        try {
+            logInfo(`\nLaunching Playwright in record mode for: ${url}\n`);
+            const { execSync } = await import('child_process');
+            execSync(`npx playwright codegen ${url} --output ${absPath}`, { stdio: 'inherit' });
+            logInfo(`\n✅ Test actions recorded and saved to ${absPath}`);
+            codegenSuccess = true;
+        }
+        catch (err) {
+            attempts++;
+            console.error(chalk.red('\nError: Playwright codegen failed.'));
+            if (attempts < 2) {
+                const inquirer = (await import('inquirer')).default;
+                const { retry } = await inquirer.prompt([
+                    {
+                        type: 'confirm',
+                        name: 'retry',
+                        message: 'Would you like to retry recording? (Make sure you do not close the browser window prematurely)',
+                        default: true,
+                    },
+                ]);
+                if (!retry)
+                    break;
+            }
+            else {
+                console.error(chalk.red('Codegen failed twice. Please check your environment, output path, and Playwright installation.'));
+            }
+        }
     }
     // Prompt to run the test
     const inquirer = (await import('inquirer')).default;
@@ -373,7 +415,6 @@ async function generateTest(config, interactive = false) {
                         const jiraUrl = `${jiraDomain}/browse/${config.ticket.key}`;
                         try {
                             // Cross-platform browser open
-                            const { execSync } = await import('child_process');
                             const platform = process.platform;
                             let openCmd = '';
                             if (platform === 'darwin') {
@@ -385,7 +426,11 @@ async function generateTest(config, interactive = false) {
                             else {
                                 openCmd = `xdg-open "${jiraUrl}"`;
                             }
-                            execSync(openCmd);
+                            exec(openCmd, (error) => {
+                                if (error) {
+                                    console.warn('Could not open Jira card in browser:', error);
+                                }
+                            });
                         }
                         catch (err) {
                             console.warn('Could not open Jira card in browser:', err);

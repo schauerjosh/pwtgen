@@ -18,6 +18,9 @@ import { validateConfig } from './utils/validation.js';
 import { logger } from './utils/logger.js';
 import type { TestConfig, Environment, RAGContext, GeneratedTest } from './types/index.js';
 import pkg from '../package.json' with { type: 'json' };
+import path from 'path';
+import fs from 'fs';
+import { execSync } from 'child_process';
 
 dotenvConfig();
 
@@ -271,12 +274,18 @@ async function handleRecordCommand(options: RecordOptions = {}) {
   };
   const envKey = String(options.env) as keyof typeof ENV_URLS;
   const url = ENV_URLS[envKey];
-  const absPath = options.output;
+  let absPath = options.output;
 
-  // Launch Playwright in record mode
-  const { execSync } = await import('child_process');
+  // Ensure absPath is a file, not a directory, and is defined
+  if (typeof absPath === 'undefined' || !absPath) {
+    throw new Error('Output path is required.');
+  }
+  if (!path.extname(absPath) || (fs.existsSync(absPath) && fs.lstatSync(absPath).isDirectory())) {
+    absPath = path.join(absPath, 'recorded.test.ts');
+  }
   try {
     logInfo(`\nLaunching Playwright in record mode for: ${url}\n`);
+    const { execSync } = await import('child_process');
     execSync(`npx playwright codegen ${url} --output ${absPath}`, { stdio: 'inherit' });
     logInfo(`\n✅ Test actions recorded and saved to ${absPath}`);
   } catch (err) {
@@ -284,6 +293,7 @@ async function handleRecordCommand(options: RecordOptions = {}) {
   }
 
   // Prompt to run the test
+  const inquirer = (await import('inquirer')).default;
   const { runTest } = await inquirer.prompt([
     {
       type: 'confirm',
@@ -295,6 +305,7 @@ async function handleRecordCommand(options: RecordOptions = {}) {
   if (runTest) {
     try {
       logInfo(`\nRunning: TEST_ENV=${envKey} PWDEBUG=1 npx playwright test ${absPath}\n`);
+      const { execSync } = await import('child_process');
       execSync(`TEST_ENV=${envKey} PWDEBUG=1 npx playwright test ${absPath}`, { stdio: 'inherit' });
     } catch (err) {
       console.error('Error:', err);
@@ -389,7 +400,18 @@ async function generateTest(config: TestConfig, interactive = false): Promise<vo
             const jiraDomain = process.env.JIRA_BASE_URL?.replace(/\/$/, '') || 'https://your-company.atlassian.net';
             const jiraUrl = `${jiraDomain}/browse/${config.ticket.key}`;
             try {
-              execSync(`open ${jiraUrl}`); // macOS: use 'open', Windows: use 'start', Linux: use 'xdg-open'
+              // Cross-platform browser open
+              const { execSync } = await import('child_process');
+              const platform = process.platform;
+              let openCmd = '';
+              if (platform === 'darwin') {
+                openCmd = `open "${jiraUrl}"`;
+              } else if (platform === 'win32') {
+                openCmd = `start "" "${jiraUrl}"`;
+              } else {
+                openCmd = `xdg-open "${jiraUrl}"`;
+              }
+              execSync(openCmd);
             } catch (err) {
               console.warn('Could not open Jira card in browser:', err);
             }

@@ -19,7 +19,8 @@ import { logger } from './utils/logger.js';
 import type { TestConfig, Environment, RAGContext, GeneratedTest } from './types/index.js';
 import pkg from '../package.json' with { type: 'json' };
 import path from 'path';
-import fs from 'fs';
+import * as fs from 'fs';
+const fsp = fs.promises;
 import { execSync, exec } from 'child_process';
 
 dotenvConfig();
@@ -166,12 +167,6 @@ program
       debugMode = true;
     }
     // Prompt for missing values ONLY here
-    const ENV_URLS = {
-      prod: process.env.PROD_BASE_URL || '',
-      test: process.env.TWO_TEST_BASE_URL || '',
-      qa: process.env.QA_BASE_URL || '',
-      staging: process.env.SMOKE_BASE_URL || ''
-    };
     let env = options.env;
     if (!env) {
       const response = await inquirer.prompt([
@@ -180,10 +175,10 @@ program
           name: 'env',
           message: 'Select the environment:',
           choices: [
-            { name: `prod (${ENV_URLS.prod})`, value: 'prod' },
-            { name: `test (${ENV_URLS.test})`, value: 'test' },
-            { name: `qa (${ENV_URLS.qa})`, value: 'qa' },
-            { name: `staging (${ENV_URLS.staging})`, value: 'staging' }
+            { name: `prod (${process.env.PROD_BASE_URL})`, value: 'prod' },
+            { name: `test (${process.env.TWO_TEST_BASE_URL})`, value: 'test' },
+            { name: `qa (${process.env.QA_BASE_URL})`, value: 'qa' },
+            { name: `staging (${process.env.SMOKE_BASE_URL})`, value: 'staging' }
           ],
           default: 'test',
         },
@@ -282,14 +277,8 @@ async function handleRecordCommand(options: RecordOptions = {}) {
     process.exit(1);
   }
 
-  const ENV_URLS = {
-    prod: process.env.PROD_BASE_URL || '',
-    test: process.env.TWO_TEST_BASE_URL || '',
-    qa: process.env.QA_BASE_URL || '',
-    staging: process.env.SMOKE_BASE_URL || ''
-  };
-  const envKey = String(options.env) as keyof typeof ENV_URLS;
-  const url = ENV_URLS[envKey];
+  const envKey = String(options.env);
+  const url = getBaseUrl(envKey);
   let absPath = options.output;
 
   // Ensure absPath is a file, not a directory, and is defined
@@ -313,7 +302,7 @@ async function handleRecordCommand(options: RecordOptions = {}) {
       execSync(`npx playwright codegen ${url} --output ${absPath}`, { stdio: 'inherit' });
       logInfo(`\n✅ Test actions recorded and saved to ${absPath}`);
       codegenSuccess = true;
-    } catch (err) {
+    } catch {
       attempts++;
       console.error(chalk.red('\nError: Playwright codegen failed.'));
       if (attempts < 2) {
@@ -333,8 +322,72 @@ async function handleRecordCommand(options: RecordOptions = {}) {
     }
   }
 
+  // After codegen, but before writing output, check if file exists and prompt for action
+  let mergeMode = false;
+  if (fs.existsSync(absPath)) {
+    const { fileAction } = await inquirer.prompt([
+      {
+        type: 'list',
+        name: 'fileAction',
+        message: `Test file ${absPath} already exists. What would you like to do?`,
+        choices: [
+          { name: 'Overwrite', value: 'overwrite' },
+          { name: 'Merge (append new steps to existing test)', value: 'merge' },
+          { name: 'Cancel', value: 'cancel' }
+        ],
+        default: 'merge',
+      },
+    ]);
+    if (fileAction === 'cancel') {
+      console.log(chalk.yellow('Operation cancelled. No changes made.'));
+      return;
+    }
+    if (fileAction === 'merge') {
+      mergeMode = true;
+    }
+  }
+
+  // Read new test code from codegen
+  let newTestCode = '';
+  try {
+    newTestCode = await fsp.readFile(absPath, 'utf8');
+  } catch (e) {
+    console.error(chalk.red('Failed to read newly recorded test file:'), e);
+    return;
+  }
+
+  if (mergeMode) {
+    // Merge: read existing file, append new steps inside test block
+    let existing = '';
+    try {
+      existing = await fsp.readFile(absPath, 'utf8');
+    } catch (e) {
+      console.error(chalk.red('Failed to read existing test file for merge:'), e);
+      return;
+    }
+    // Simple merge: try to find the last closing bracket of the test block and insert before it
+    const testBlockMatch = existing.match(/(test\.(?:describe|it|test)\([^]*?\{)([^]*)(\}\);?)/);
+    if (testBlockMatch) {
+      // Compute newSteps before using it
+      const newSteps = newTestCode.replace(/^[\s\S]*?\{/, '').replace(/\}\);?\s*$/, '');
+      const start = testBlockMatch[1];
+      const body = testBlockMatch[2];
+      const end = testBlockMatch[3];
+      const merged = `${start}${body}\n// --- MERGED STEPS ---\n${newSteps}\n${end}`;
+      await fsp.writeFile(absPath, merged, 'utf8');
+      console.log(chalk.green('Merged new steps into existing test file: ' + absPath));
+    } else {
+      // Fallback: just append
+      await fsp.appendFile(absPath, '\n// --- MERGED STEPS ---\n' + newTestCode);
+      console.log(chalk.yellow('Could not find test block, appended new steps to end of file.'));
+    }
+  } else {
+    // Overwrite mode: file is replaced
+    // Already written by codegen, so nothing to do
+    console.log(chalk.green('Test file written: ' + absPath));
+  }
+
   // Prompt to run the test
-  const inquirer = (await import('inquirer')).default;
   const { runTest } = await inquirer.prompt([
     {
       type: 'confirm',
@@ -352,6 +405,7 @@ async function handleRecordCommand(options: RecordOptions = {}) {
       console.error('Error:', err);
     }
   }
+  return;
 }
 
 interface GenerateOptions {
@@ -400,18 +454,23 @@ async function generateTest(config: TestConfig, interactive = false): Promise<vo
   const spinner = ora('Generating Playwright test...').start();
   try {
     const generator = new TestGenerator();
-    let interventionIndex = null;
-    let interventionCode = '';
-    let steps: string[] = [];
+    const interventionIndex = null;
+    const interventionCode = '';
     if (interactive) {
       // Dev intervention loop
       const ragContexts = await generator['retrieveContext'](config);
-      const aiSteps = await generator['generateTestCode'](config, ragContexts);
-      steps = aiSteps.split(/(?=await test\.step)/g);
+      let aiSteps = await generator['generateTestCode'](config, ragContexts);
+      // Split on test.step boundaries, but keep the import and describe block at the top
+      const stepStart = aiSteps.indexOf('test.describe');
+      if (stepStart > 0) {
+        aiSteps = aiSteps.slice(stepStart);
+      }
+      // Split AI-generated steps for intervention
+      const steps = aiSteps.split(/(?=await test\.step)/g);
       for (let i = 0; i < steps.length; i++) {
         console.log(chalk.yellow(`\nStep ${i + 1}:`));
         console.log(chalk.cyan(steps[i]));
-        spinner.stop(); // Ensure spinner does not hide prompt
+        spinner.stop();
         const interventionChoices = [
           { name: 'Accept suggested code', value: 'accept' },
           { name: 'Edit code (manual/codegen)', value: 'edit' },
@@ -451,7 +510,7 @@ async function generateTest(config: TestConfig, interactive = false): Promise<vo
               } else {
                 openCmd = `xdg-open "${jiraUrl}"`;
               }
-              exec(openCmd, (error: any) => {
+              exec(openCmd, (error: Error | null) => {
                 if (error) {
                   console.warn('Could not open Jira card in browser:', error);
                 }
@@ -461,34 +520,35 @@ async function generateTest(config: TestConfig, interactive = false): Promise<vo
             }
           }
           // Launch Playwright codegen with current test file
-          const { TestGeneratorUtils } = await import('./core/TestGenerator.js');
-          const url = TestGeneratorUtils.getBaseUrl(config.environment);
+          const url = getBaseUrl(config.environment);
           const testFilePath = config.outputPath;
+          // Determine auth.json path (same as .env)
+          const envPath = path.resolve(process.cwd(), '.env');
+          const authPath = path.join(path.dirname(envPath), 'auth.json');
+          let storageStateArg = '';
+          if (fs.existsSync(authPath)) {
+            storageStateArg = `--storage-state=${authPath}`;
+            logInfo(`Using authentication state from: ${authPath}`);
+          }
           try {
             logInfo(`\nLaunching Playwright codegen for: ${url} with file: ${testFilePath}\n`);
-            execSync(`npx playwright codegen ${url} --output ${testFilePath}`, { stdio: 'inherit' });
+            execSync(`npx playwright codegen ${url} --output ${testFilePath} ${storageStateArg}`.trim(), { stdio: 'inherit' });
             logInfo(`\n✅ Edited actions recorded and saved to ${testFilePath}`);
-            const fs = await import('fs/promises');
-            const updatedCode = await fs.readFile(testFilePath, 'utf8');
-            // Prompt which step to replace
-            const { replaceIndex } = await inquirer.prompt([
-              {
-                type: 'list',
-                name: 'replaceIndex',
-                message: 'Which step would you like to replace with your manual intervention?',
-                choices: steps.map((step, idx) => ({ name: `Step ${idx + 1}: ${step.substring(0, 40)}...`, value: idx }))
-              }
-            ]);
-            steps[replaceIndex] = updatedCode + ' // ✏️ Developer modified via codegen';
-            interventionIndex = replaceIndex;
-            interventionCode = updatedCode;
-          } catch (err) {
-            console.error('Error recording edited actions:', err);
+            // After codegen, read the file and extract only the relevant step code
+            const updatedCode = fs.readFileSync(testFilePath, 'utf8');
+            const match = updatedCode.match(/await test\.step\([\s\S]*?\}\);/);
+            if (match) {
+              steps[i] = match[0] + ' // ✏️ Developer modified via codegen';
+            } else {
+              steps[i] = updatedCode + ' // ✏️ Developer modified via codegen';
+            }
+          } catch {
+            console.error('Error recording edited actions');
           }
-          spinner.start();
         } else if (action === 'skip') {
           steps[i] = '// Step skipped by developer';
         }
+        spinner.start();
       }
       // Phase 2: Prompt to launch codegen for manual actions
       const { wantsCodegen } = await inquirer.prompt([
@@ -501,16 +561,14 @@ async function generateTest(config: TestConfig, interactive = false): Promise<vo
       ]);
       if (wantsCodegen) {
         const codegenPath = config.outputPath.replace(/\.ts$/, '.manual.ts');
-        const { TestGeneratorUtils } = await import('./core/TestGenerator.js');
-        const url = TestGeneratorUtils.getBaseUrl(config.environment);
+        const url = getBaseUrl(config.environment);
         const { execSync } = await import('child_process');
         try {
           logInfo(`\nLaunching Playwright codegen for: ${url}\n`);
           execSync(`npx playwright codegen ${url} --output ${codegenPath}`, { stdio: 'inherit' });
           logInfo(`\n✅ Manual actions recorded and saved to ${codegenPath}`);
           // Read manual steps
-          const fs = await import('fs/promises');
-          await fs.readFile(codegenPath, 'utf8');
+          await fsp.readFile(codegenPath, 'utf8');
         } catch (err) {
           console.error('Error recording manual actions:', err);
           // Offer to retry or skip
@@ -530,14 +588,31 @@ async function generateTest(config: TestConfig, interactive = false): Promise<vo
           }
         }
       }
-    } else {
-      // Non-interactive: generate steps directly
-      const ragContexts = await generator['retrieveContext'](config);
-      const aiSteps = await generator['generateTestCode'](config, ragContexts);
-      steps = aiSteps.split(/(?=await test\.step)/g);
+      // Merge header and steps for final output
+      const mergedCode = steps.join('\n\n');
+      // Use fsPromises for all async file operations
+      const fsPromises = await import('fs/promises');
+      await fsPromises.mkdir(config.outputPath.replace(/\/[^/]+$/, ''), { recursive: true });
+      await fsPromises.writeFile(config.outputPath, mergedCode, 'utf8');
+      spinner.succeed('Test generation complete');
+      console.log(chalk.green('Test saved to: ' + config.outputPath));
+      if (interventionIndex !== null) {
+        const mappingFile = 'knowledge-base/workflows/card-test-mapping.md';
+        const mappingDir = 'knowledge-base/workflows';
+        await fsPromises.mkdir(mappingDir, { recursive: true });
+        const cardKey = config.ticket?.key || '';
+        const cardSummary = config.ticket?.summary || '';
+        const cardDetails = config.ticket?.description || '';
+        const mappingText = '\n---\nCard: ' + cardKey + '\nSummary: ' + cardSummary + '\nDetails: ' + cardDetails + '\nTest File: ' + config.outputPath + '\nIntervention Step: ' + (interventionIndex + 1) + '\nIntervention Code: ' + interventionCode.substring(0, 200) + '\n---\n';
+        await fsPromises.appendFile(mappingFile, mappingText);
+        console.log(chalk.green('Intervention mapping appended to ' + mappingFile));
+      }
+      return;
     }
+    // Non-interactive: generate steps directly
+    // Remove unused steps variable (already handled by generator.generate)
+    // const steps = aiSteps.split(/(?=await test\.step)/g);
     // Get the base URL for the selected environment
-    const { TestGeneratorUtils } = await import('./core/TestGenerator.js');
     // Remove unused baseUrl, email, password variables
 
     // Remove loginSteps variable and any code that references it
@@ -545,12 +620,11 @@ async function generateTest(config: TestConfig, interactive = false): Promise<vo
     const result = await generator.generate(config);
     const mergedCode = result.content;
     // Write final merged code to output path
-    const fs = await import('fs/promises');
     try {
-      const stats = await fs.stat(config.outputPath);
-      if (stats.isDirectory()) {
+      const stats = await fsp.stat(config.outputPath).catch(() => undefined);
+      if (stats && stats.isDirectory()) {
         const backupPath = config.outputPath + '.bak_' + Date.now();
-        await fs.rename(config.outputPath, backupPath);
+        await fsp.rename(config.outputPath, backupPath);
         logInfo(`Directory at ${config.outputPath} was renamed to ${backupPath} to allow file creation.`);
       }
     } catch (e) {
@@ -559,27 +633,27 @@ async function generateTest(config: TestConfig, interactive = false): Promise<vo
     }
     // Before writing, ensure output path is a file, not a directory
     try {
-      const stats = await fs.stat(config.outputPath);
-      if (stats.isDirectory()) {
+      const stats = await fsp.stat(config.outputPath).catch(() => undefined);
+      if (stats && stats.isDirectory()) {
         throw new Error(`Output path ${config.outputPath} is a directory. Please provide a valid file path ending with .spec.ts.`);
       }
     } catch (e) {
       // ENOENT is fine (file doesn't exist yet)
       if (e && typeof e === 'object' && 'code' in e && (e as { code?: string }).code !== 'ENOENT') throw e;
     }
-    await fs.mkdir(config.outputPath.replace(/\/[^/]+$/, ''), { recursive: true });
-    await fs.writeFile(config.outputPath, mergedCode, 'utf8');
+    await fsp.mkdir(config.outputPath.replace(/\/[^/]+$/, ''), { recursive: true });
+    await fsp.writeFile(config.outputPath, mergedCode, 'utf8');
     spinner.succeed('Test generation complete');
     console.log(chalk.green('Test saved to: ' + config.outputPath));
     if (interventionIndex !== null) {
       const mappingFile = 'knowledge-base/workflows/card-test-mapping.md';
       const mappingDir = 'knowledge-base/workflows';
-      await fs.mkdir(mappingDir, { recursive: true });
+      await fsp.mkdir(mappingDir, { recursive: true });
       const cardKey = config.ticket?.key || '';
       const cardSummary = config.ticket?.summary || '';
       const cardDetails = config.ticket?.description || '';
       const mappingText = '\n---\nCard: ' + cardKey + '\nSummary: ' + cardSummary + '\nDetails: ' + cardDetails + '\nTest File: ' + config.outputPath + '\nIntervention Step: ' + (interventionIndex + 1) + '\nIntervention Code: ' + interventionCode.substring(0, 200) + '\n---\n';
-      await fs.appendFile(mappingFile, mappingText);
+      await fsp.appendFile(mappingFile, mappingText);
       console.log(chalk.green('Intervention mapping appended to ' + mappingFile));
     }
     logTestSummary(result, config);
@@ -648,6 +722,17 @@ function getValidTestFilePath(input: string): string {
     name = `playwright/public/${name}`;
   }
   return name;
+}
+
+// Replace TestGenerator.getBaseUrl with a local helper
+function getBaseUrl(env: string): string {
+  const ENV_URLS: Record<string, string> = {
+    prod: process.env.PROD_BASE_URL || '',
+    test: process.env.TWO_TEST_BASE_URL || '',
+    qa: process.env.QA_BASE_URL || '',
+    staging: process.env.SMOKE_BASE_URL || ''
+  };
+  return ENV_URLS[env] || '';
 }
 
 program.parse(process.argv);
